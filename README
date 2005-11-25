@@ -1,0 +1,5 @@
+Use this to mount archives (as in compressed tar archives, zip archives
+and so on, everything libarchive can cope with) via FUSE. Usage:
+archivemount <options> <archive> <mountpoint>
+Options are the normal fuse mount options, nothing special supported here.
+
