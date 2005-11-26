@@ -1,2 +1,4 @@
-* 0.1   Initial release, read-only support
+* 0.1   - initial release, read-only support
+* 0.2   - major code cleanup
+        - implemented ar_readlink
 
