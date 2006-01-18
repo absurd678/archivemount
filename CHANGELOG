@@ -1,4 +1,11 @@
-* 0.1   - initial release, read-only support
+* 0.4.0 - write support (everything but symlinks); NO GUARANTEE FOR YOUR DATA
+        - the usual amount of bug fixes
+        - new parameter "-v" / "--version"
+        - made dist-target in Makefile work
+        - version numbers have three parts now, major, minor and release
+* 0.3   - preliminary write support (metadata only)
+        - many many bugfixes, especially reading works now more than once..
 * 0.2   - major code cleanup
-        - implemented ar_readlink
+        - implemented ar_readlink()
+* 0.1   - initial release, read-only support
 

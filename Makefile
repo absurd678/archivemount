@@ -3,6 +3,7 @@ EXE = $(PROJECT)
 SRC = archivemount.c
 OBJ = $(SRC:.c=.o)
 
+DARCS = darcs
 CTAGS = ctags
 RM = rm -f
 CC = gcc
@@ -14,14 +15,14 @@ LDFLAGS = -larchive -lfuse
 ifeq ($(DEBUG),1)
 	CFLAGS += -ggdb -O0
 else
-	CFLAGS += -O2 -DNDEBUG
+	CFLAGS += -O2 -DNDEBUG -Wall -W
 endif
 
 $(EXE): $(OBJ) Makefile
 	$(CC) $(LDFLAGS) -o $@ $(OBJ)
 
 dist:
-	$(DARCS) dist --dist-name $(PROJECT)-`$(DARCS) --version`
+	$(DARCS) dist --dist-name $(PROJECT)-`./$(EXE) --version`
 
 tags: $(SRC) $(SRC:.c=.h)
 	$(CTAGS) --recurse=yes $?
