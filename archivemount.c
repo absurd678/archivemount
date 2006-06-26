@@ -10,7 +10,7 @@
 */
 
 #define VER_MAJOR 0
-#define VER_MINOR 4
+#define VER_MINOR 5
 #define VER_RELEASE 0
 
 #ifdef linux
@@ -419,9 +419,13 @@ update_entry_stat( NODE *node )
 	archive_entry_set_rdevmajor( node->entry, st.st_dev );
 	archive_entry_set_rdevminor( node->entry, st.st_dev );
 	pwd = getpwuid( st.st_uid );
-	archive_entry_set_uname( node->entry, strdup( pwd->pw_name ) );
+	if( pwd ) {
+		archive_entry_set_uname( node->entry, strdup( pwd->pw_name ) );
+	}
 	grp = getgrgid( st.st_gid );
-	archive_entry_set_gname( node->entry, strdup( grp->gr_name ) );
+	if( grp ) {
+		archive_entry_set_gname( node->entry, strdup( grp->gr_name ) );
+	}
 	return 0;
 }
 
@@ -884,7 +888,7 @@ ar_mkdir( const char *path, mode_t mode )
 		rmdir( location );
 		free( location );
 		free( node->name );
-		free( node->entry );
+		archive_entry_free( node->entry );
 		free( node );
 		return tmp;
 	}
@@ -895,7 +899,7 @@ ar_mkdir( const char *path, mode_t mode )
 		rmdir( location );
 		free( location );
 		free( node->name );
-		free( node->entry );
+		archive_entry_free( node->entry );
 		free( node );
 		return -ENOENT;
 	}
@@ -995,15 +999,47 @@ ar_symlink( const char *from, const char *to )
 	archive_entry_set_symlink( node->entry, strdup( from ) );
 	/* get user/group name */
 	pwd = getpwuid( st.st_uid );
-	archive_entry_set_uname( node->entry, strdup( pwd->pw_name ) );
+	if( pwd ) {
+		/* a name was found for the uid */
+		archive_entry_set_uname( node->entry, strdup( pwd->pw_name ) );
+	} else {
+		if( errno == EINTR || errno == EIO || errno == EMFILE || 
+				errno == ENFILE || errno == ENOMEM ||
+				errno == ERANGE )
+		{
+			log( "ERROR calling getpwuid: %s", strerror( errno ) );
+			free( node->name );
+			archive_entry_free( node->entry );
+			free( node );
+			return 0 - errno;
+		}
+		/* on other errors the uid just could
+		   not be resolved into a name */
+	}
 	grp = getgrgid( st.st_gid );
-	archive_entry_set_gname( node->entry, strdup( grp->gr_name ) );
+	if( grp ) {
+		/* a name was found for the uid */
+		archive_entry_set_gname( node->entry, strdup( grp->gr_name ) );
+	} else {
+		if( errno == EINTR || errno == EIO || errno == EMFILE || 
+				errno == ENFILE || errno == ENOMEM ||
+				errno == ERANGE )
+		{
+			log( "ERROR calling getgrgid: %s", strerror( errno ) );
+			free( node->name );
+			archive_entry_free( node->entry );
+			free( node );
+			return 0 - errno;
+		}
+		/* on other errors the gid just could
+		   not be resolved into a name */
+	}
 	/* add node to tree */
 	if( insert_by_path( root, node ) != 0 ) {
 		log( "ERROR: could not insert symlink %s into tree",
 				node->name );
 		free( node->name );
-		free( node->entry );
+		archive_entry_free( node->entry );
 		free( node );
 		return -ENOENT;
 	}
@@ -1025,14 +1061,19 @@ ar_link( const char *from, const char *to )
 	if( ! archiveWriteable ) {
 		return -EROFS;
 	}
-	/* check for existing node */
-	fromnode = get_node_for_path( root, to );
-	if( fromnode ) {
+	/* find source node */
+	fromnode = get_node_for_path( root, from );
+	if( ! fromnode ) {
+		return -ENOENT;
+	}
+	/* check for existing target */
+	node = get_node_for_path( root, to );
+	if( node ) {
 		return -EEXIST;
 	}
 	/* extract originals stat info */
 	ar_getattr( from, &st );
-	/* build node */
+	/* build new node */
 	node = ( NODE * )malloc( sizeof( NODE ) );
 	init_node( node );
 	node->name = strdup( to );
@@ -1050,18 +1091,51 @@ ar_link( const char *from, const char *to )
 	archive_entry_set_hardlink( node->entry, strdup( from ) );
 	/* get user/group name */
 	pwd = getpwuid( st.st_uid );
-	archive_entry_set_uname( node->entry, strdup( pwd->pw_name ) );
+	if( pwd ) {
+		/* a name was found for the uid */
+		archive_entry_set_uname( node->entry, strdup( pwd->pw_name ) );
+	} else {
+		if( errno == EINTR || errno == EIO || errno == EMFILE || 
+				errno == ENFILE || errno == ENOMEM ||
+				errno == ERANGE )
+		{
+			log( "ERROR calling getpwuid: %s", strerror( errno ) );
+			free( node->name );
+			archive_entry_free( node->entry );
+			free( node );
+			return 0 - errno;
+		}
+		/* on other errors the uid just could
+		   not be resolved into a name */
+	}
 	grp = getgrgid( st.st_gid );
-	archive_entry_set_gname( node->entry, strdup( grp->gr_name ) );
+	if( grp ) {
+		/* a name was found for the uid */
+		archive_entry_set_gname( node->entry, strdup( grp->gr_name ) );
+	} else {
+		if( errno == EINTR || errno == EIO || errno == EMFILE || 
+				errno == ENFILE || errno == ENOMEM ||
+				errno == ERANGE )
+		{
+			log( "ERROR calling getgrgid: %s", strerror( errno ) );
+			free( node->name );
+			archive_entry_free( node->entry );
+			free( node );
+			return 0 - errno;
+		}
+		/* on other errors the gid just could
+		   not be resolved into a name */
+	}
 	/* add node to tree */
 	if( insert_by_path( root, node ) != 0 ) {
-		log( "ERROR: could not insert symlink %s into tree",
+		log( "ERROR: could not insert hardlink %s into tree",
 				node->name );
 		free( node->name );
-		free( node->entry );
+		archive_entry_free( node->entry );
 		free( node );
 		return -ENOENT;
 	}
+log("done");
 	/* clean up */
 	archiveModified = 1;
 	return 0;
@@ -1355,7 +1429,7 @@ ar_mknod( const char *path, mode_t mode, dev_t rdev )
 		unlink( location );
 		free( location );
 		free( node->name );
-		free( node->entry );
+		archive_entry_free( node->entry );
 		free( node );
 		return tmp;
 	}
@@ -1366,7 +1440,7 @@ ar_mknod( const char *path, mode_t mode, dev_t rdev )
 		unlink( location );
 		free( location );
 		free( node->name );
-		free( node->entry );
+		archive_entry_free( node->entry );
 		free( node );
 		return -ENOENT;
 	}
