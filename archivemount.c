@@ -11,7 +11,7 @@
 
 #define VER_MAJOR 0
 #define VER_MINOR 5
-#define VER_RELEASE 0
+#define VER_RELEASE 3
 
 #ifdef linux
 /* For pread()/pwrite() */
@@ -95,14 +95,15 @@ static NODE *root;
 static void
 init_node( NODE *node )
 {
-	node->child = NULL;
+	node->parent = NULL;
 	node->prev = NULL;
 	node->next = NULL;
-	node->parent = NULL;
-	node->entry = NULL;
+	node->child = NULL;
 	node->name = NULL;
 	node->location = NULL;
 	node->namechanged = 0;
+	node->entry = NULL;
+	node->modified = 0;
 }
 
 static void
@@ -155,24 +156,62 @@ insert_by_path( NODE *root, NODE *node )
 	while( ( temp = strchr( key, '/' ) ) ) {
 		size_t namlen = temp - key;
 		char nam[namlen + 1];
+		NODE *last = cur;
 
 		strncpy( nam, key, namlen );
 		nam[namlen] = '\0';
 		if( strcmp( strrchr( cur->name, '/' ) + 1, nam ) != 0 ) {
 			cur = cur->child;
 			while( cur && strcmp( strrchr( cur->name, '/' ) + 1,
-						nam ) != 0 ) {
+						nam ) != 0 )
+			{
 				cur = cur->next;
 			}
 		}
 		if( ! cur ) {
-			/* parent path not found */
-			return -ENOENT;
+			/* parent path not found, create a temporary one */
+			NODE *tempnode;
+			tempnode = malloc( sizeof( NODE ) );
+			init_node( tempnode );
+			tempnode->name = malloc(
+					strlen( last->name ) + namlen + 1 );
+			if( last != root ) {
+				sprintf( tempnode->name, "%s/%s", last->name, nam );
+			} else {
+				sprintf( tempnode->name, "/%s", nam );
+			}
+			tempnode->entry = archive_entry_clone( root->entry );
+			/* insert it recursively */
+			insert_by_path( root, tempnode );
+			/* now inserting node should work, correct cur for it */
+			cur = tempnode;
 		}
+		/* iterate */
 		key = temp + 1;
 	}
 	if( S_ISDIR( archive_entry_mode( cur->entry ) ) ) {
-		insert_as_child( node, cur );
+		/* check if a child of this name already exists */
+		NODE *tempnode;
+		int found = 0;
+		tempnode = cur->child;
+		while( tempnode ) {
+			if( strcmp( strrchr( tempnode->name, '/' ) + 1,
+						strrchr( node->name, '/' ) + 1 )
+					== 0 )
+			{
+				/* this is a dupe due to a temporarily inserted
+				   node, just update the entry */
+				archive_entry_free( node->entry );
+				node->entry = archive_entry_clone(
+						tempnode->entry );
+				found = 1;
+				break;
+			}
+			tempnode = tempnode->next;
+		}
+		if( ! found ) {
+			insert_as_child( node, cur );
+		}
 	} else {
 		return -ENOTDIR;
 	}
@@ -233,16 +272,26 @@ build_tree( const char *mtpt )
 	while( archive_read_next_header( archive, &entry ) == ARCHIVE_OK ) {
 		NODE *cur;
 		const char *name;
+		/* find name of node */
+		name = archive_entry_pathname( entry );
+		if( strncmp( name, "./\0", 3 ) == 0 ) {
+			/* special case: the directory "./" must be skipped! */
+			continue;
+		}
+		/* create node and clone the entry */
 		cur = malloc( sizeof( NODE ) );
 		init_node( cur );
-		/* set name and entry of node */
-		name = archive_entry_pathname( entry );
 		cur->entry = archive_entry_clone( entry );
-		/* prepend a '/' to name if needed */
-		if( *name != '/' ) {
+		/* normalize the name to start with "/" */
+		if( strncmp( name, "./", 2 ) == 0 ) {
+			/* remove the "." of "./" */
+			cur->name = strdup( name + 1 );
+		} else if( name[0] != '/' ) {
+			/* prepend a '/' to name */
 			cur->name = malloc( strlen( name ) + 2 );
 			sprintf( cur->name, "/%s", name );
 		} else {
+			/* just set the name */
 			cur->name = strdup( name );
 		}
 		/* remove trailing '/' for directories */
@@ -1135,7 +1184,6 @@ ar_link( const char *from, const char *to )
 		free( node );
 		return -ENOENT;
 	}
-log("done");
 	/* clean up */
 	archiveModified = 1;
 	return 0;
@@ -1150,7 +1198,7 @@ ar_truncate( const char *path, off_t size )
 	int tmp;
 	int fh;
 
-	log( "truncate called" );
+	//log( "truncate called" );
 	if( ! archiveWriteable ) {
 		return -EROFS;
 	}
@@ -1201,7 +1249,7 @@ ar_truncate( const char *path, off_t size )
 			int len = tmpsize > MAXBUF ? MAXBUF : tmpsize;
 			/* read */
 			if( ( tmp = ar_read( path, tmpbuf, len, tmpoffset, &fi ) )
-					!= 0 )
+					< 0 )
 			{
 				log( "ERROR reading while copying %s to "
 						"temporary location %s: %s",
@@ -1213,7 +1261,7 @@ ar_truncate( const char *path, off_t size )
 				return tmp;
 			}
 			/* write */
-			if( write( fh, tmpbuf, len ) == -1 ) {
+			if( write( fh, tmpbuf, tmp ) == -1 ) {
 				tmp = 0 - errno;
 				log( "ERROR writing while copying %s to "
 					       "temporary location %s: %s",
@@ -1669,6 +1717,7 @@ ar_readdir( const char *path, void *buf, fuse_fill_dir_t filler,
 	//log( "readdir got path: '%s'", path );
 	node = get_node_for_path( root, path );
 	if( ! node ) {
+		log( "path '%s' not found", path );
 		return -ENOENT;
 	}
 

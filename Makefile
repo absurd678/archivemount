@@ -3,9 +3,12 @@ EXE = $(PROJECT)
 SRC = archivemount.c
 OBJ = $(SRC:.c=.o)
 
-DARCS = darcs
 CTAGS = ctags
-RM = rm -f
+BZR = bzr
+MKDIR = mkdir
+RM = rm -rf
+CP = cp -a
+TAR = tar
 CC = gcc
 all: $(EXE)
 
@@ -21,14 +24,19 @@ endif
 $(EXE): $(OBJ) Makefile
 	$(CC) $(LDFLAGS) -o $@ $(OBJ)
 
-dist:
-	$(DARCS) dist --dist-name $(PROJECT)-`./$(EXE) --version`
-
 tags: $(SRC) $(SRC:.c=.h)
 	$(CTAGS) --recurse=yes $?
 
 clean:
 	$(RM) $(OBJ) $(EXE) dep tags
+
+dist: $(EXE)
+	VERSION="`./$(EXE) --version`"; \
+	PV="$(PROJECT)-$$VERSION"; \
+	$(MKDIR) "$$PV"; \
+	$(CP) `bzr inventory` "$$PV"; \
+	$(TAR) cvzf "$$PV.tar.gz" "$$PV"; \
+	$(RM) "$$PV"; \
 
 .c.o:
 	$(CC) $(CFLAGS) -c $<
@@ -38,6 +46,6 @@ dep:
 
 include dep
 
-.PHONY: all test clean
+.PHONY: all test clean dist
 
 	
