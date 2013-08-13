@@ -1,7 +1,7 @@
 \" Process this file with
 .\" groff -man -Tascii archivemount.1
 .\"
-.TH ARCHIVEMOUNT "1" "1 November 2008" "ARCHIVEMOUNT version 0.6.1" "User Commands"
+.TH ARCHIVEMOUNT "1" "1 November 2008" "ARCHIVEMOUNT version 0.8.0" "User Commands"
 .SH NAME
 archivemount \- mounts an archive for access as a file system
 .SH SYNOPSIS
@@ -105,6 +105,9 @@ disable write support
 .TP
 \fB\-o\fR nobackup
 remove archive file backups
+.TP
+\fB\-o\fR subtree=<regex>
+mount only subtree of archive, strip subtree part from path
 
 .SS "FUSE mount options"
 
