@@ -307,7 +307,8 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 archivemount_SOURCES = archivemount.c uthash.h
 archivemount_LDADD = $(ARCHIVE_LIBS) $(FUSE_LIBS)
-archivemount_CFLAGS = $(FUSE_CFLAGS) $(am__append_1) $(am__append_2)
+archivemount_CFLAGS = $(FUSE_CFLAGS) -D_FILE_OFFSET_BITS=64 \
+	$(am__append_1) $(am__append_2)
 dist_man_MANS = archivemount.1
 EXTRA_DIST = CHANGELOG
 all: config.h
