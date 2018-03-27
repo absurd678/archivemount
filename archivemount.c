@@ -752,22 +752,17 @@ rename_recursively(NODE *start, const char *from, const char *to)
 static int
 get_temp_file_name(const char *path, char **location)
 {
-	char *tmppath;
-	char *tmp;
 	int fh;
 
 	/* create name for temp file */
-	tmp = tmppath = strdup(path);
-	do if (*tmp == '/') *tmp = '_'; while (*(tmp++));
 	if ((*location = (char *)malloc(
 				strlen(P_tmpdir) +
-				strlen("_archivemount") +
-				strlen(tmppath) + 8)) == NULL) {
+				strlen("/archivemount_XXXXXX") +
+				1)) == NULL) {
 		log("Out of memory");
 		return -ENOMEM;
 	}
-	sprintf(*location, "%s/archivemount%s_XXXXXX", P_tmpdir, tmppath);
-	free(tmppath);
+	sprintf(*location, "%s/archivemount_XXXXXX", P_tmpdir);
 	if ((fh = mkstemp(*location))  == -1) {
 		log("Could not create temp file name %s: %s",
 			*location, strerror(errno));
@@ -879,7 +874,6 @@ write_new_modded_file(NODE *node, struct archive_entry *wentry,
 		}
 	} else {
 		/* no data, only write header (e.g. when node is a link!) */
-		/* FIXME: hardlinks are saved, symlinks not. why??? */
 		//log("writing header for file %s", archive_entry_pathname(wentry));
 		archive_write_header(newarc, wentry);
 	}
@@ -1065,10 +1059,10 @@ save(const char *archiveFile)
 		if (node->namechanged) {
 			if (*name == '/') {
 				archive_entry_set_pathname(
-					wentry, node->name);
+						wentry, node->name);
 			} else {
 				archive_entry_set_pathname(
-					wentry, node->name + 1);
+						wentry, node->name + 1);
 			}
 		} else {
 			archive_entry_set_pathname(wentry, name);
@@ -1093,6 +1087,9 @@ save(const char *archiveFile)
 	} /* end: while read next header */
 	/* find new files to add (those do still have modified flag set */
 	while ((node = find_modified_node(root))) {
+		if (node->namechanged) {
+			correct_name_in_entry (node);
+		}
 		write_new_modded_file(node, node->entry, newarc);
 	}
 	/* clean up, re-open the new archive for reading */
@@ -1705,8 +1702,7 @@ ar_symlink(const char *from, const char *to)
 	struct passwd *pwd;
 	struct group *grp;
 
-	return -ENOSYS; /* somehow saving symlinks does not work. The code below is ok.. see write_new_modded_file() */
-	//log("symlink called, %s -> %s", from, to);
+	log("symlink called, %s -> %s", from, to);
 	if (! archiveWriteable || options.readonly) {
 		return -EROFS;
 	}
