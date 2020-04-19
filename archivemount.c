@@ -1,6 +1,6 @@
 /*
 
-   Copyright (c) 2005-2010 Andre Landwehr <andrel@cybernoia.de>
+   Copyright (c) 2005-2018 Andre Landwehr <andrel@cybernoia.de>
 
    This program can be distributed under the terms of the GNU LGPL.
    See the file COPYING.
@@ -23,6 +23,8 @@
 
 #define FUSE_USE_VERSION 26
 #define MAXBUF 4096
+
+#define BLOCK_SIZE 10240
 
 #include "config.h"
 
@@ -50,6 +52,7 @@
 #include <archive_entry.h>
 #include <pthread.h>
 #include <regex.h>
+#include <termios.h>
 
 #include "archivecomp.h"
 
@@ -90,6 +93,7 @@ typedef struct node {
 
 struct options {
 	int readonly;
+	int password;
 	int nobackup;
 	int nosave;
 	char *subtree_filter;
@@ -113,6 +117,7 @@ enum {
 static struct fuse_opt ar_opts[] =
 {
 	AR_OPT("readonly", readonly, 1),
+	AR_OPT("password", password, 1),
 	AR_OPT("nobackup", nobackup, 1),
 	AR_OPT("nosave"  , nosave  , 1),
 	AR_OPT("subtree=%s", subtree_filter, 1),
@@ -140,6 +145,8 @@ static FORMATRAW_CACHE *rawcache;
 struct options options;
 char *mtpt = NULL;
 char *archiveFile = NULL;
+char *user_passphrase = NULL;
+size_t user_passphrase_size = 0;
 pthread_mutex_t lock; /* global node tree lock */
 
 /* Taken from the GNU under the GPL */
@@ -170,6 +177,7 @@ usage(const char *progname)
 		"\n"
 		"archivemount options:\n"
 		"    -o readonly	    disable write support\n"
+		"    -o password	    prompt for a password.\n"
 		"    -o nobackup	    remove archive file backups\n"
 		"    -o nosave		    do not save changes upon unmount.\n"
 		"			    Good if you want to change something\n"
@@ -421,7 +429,12 @@ build_tree(const char *mtpt)
 		}
 		strcpy(subtree_filter, PREFIX);
 		subtree_filter = strcat(subtree_filter, options.subtree_filter);
+		/* \? is only a special char on Mac if REG_ENHANCED is specified  */
+#if defined REG_ENHANCED
+		regex_error = regcomp(&subtree, subtree_filter, REG_ENHANCED);
+#else
 		regex_error = regcomp(&subtree, subtree_filter, 0);
+#endif
 		if (regex_error) {
 			regerror(regex_error, &subtree, error_buffer, 256);
 			log("Regex build error: %s\n", error_buffer);
@@ -450,15 +463,23 @@ build_tree(const char *mtpt)
 			return archive_errno(archive);
 		}
 	}
-	if (archive_read_open_fd(archive, archiveFd, 10240) != ARCHIVE_OK) {
+	if (options.password) {
+		if (archive_read_add_passphrase(archive, user_passphrase) != ARCHIVE_OK) {
+			fprintf(stderr, "%s\n", archive_error_string(archive));
+			return archive_errno(archive);
+		}
+	}
+	if (archive_read_open_fd(archive, archiveFd, BLOCK_SIZE) != ARCHIVE_OK) {
 		fprintf(stderr, "%s\n", archive_error_string(archive));
 		return archive_errno(archive);
 	}
 	/* check if format or compression prohibits writability */
 	format = archive_format(archive);
-	//	log("FORMAT=%s",archive_format_name(archive));
+        log("mounted archive format is %s (0x%x)",
+            archive_format_name(archive), format);
 	compression = archive_filter_code(archive, 0);
-	//	log("COMPRESSION=%s",archive_compression_name(archive));
+        log("mounted archive compression is %s (0x%x)",
+            archive_filter_name(archive, 0), compression);
 	if (format & ARCHIVE_FORMAT_ISO9660
 		|| format & ARCHIVE_FORMAT_ISO9660_ROCKRIDGE
 		|| format & ARCHIVE_FORMAT_ZIP
@@ -617,8 +638,10 @@ correct_name_in_entry (NODE *node)
 		node->name[0] == '/' &&
 		archive_entry_pathname(root->child->entry)[0] != '/')
 	{
+		log ("correcting name in entry to '%s'", node->name+1);
 		archive_entry_set_pathname(node->entry, node->name + 1);
 	} else {
+		log ("correcting name in entry to '%s'", node->name);
 		archive_entry_set_pathname(node->entry, node->name);
 	}
 }
@@ -698,12 +721,27 @@ rename_recursively(NODE *start, const char *from, const char *to)
 	char *newName;
 	int ret = 0;
 	NODE *node = start;
-
+	/* removing and re-inserting nodes while iterating through
+	   the hashtable is a bad idea, so we copy all node ptrs
+	   into an array first and iterate over that instead */
+	size_t count = HASH_COUNT(start);
+	NODE *nodes[count];
+	log ("%s has %zu items", start->parent->name, count);
+	NODE **dst = &nodes[0];
 	while (node) {
+		*dst = node;
+		++dst;
+		node = node->hh.next;
+	}
+
+	size_t i;
+	for (i=0; i<count; ++i) {
+		node = nodes[i];
 		if (node->child) {
 			/* recurse */
 			ret = rename_recursively(node->child, from, to);
 		}
+		remove_child(node);
 		/* change node name */
 		individualName = node->name + strlen(from);
 		if (*to != '/') {
@@ -721,13 +759,13 @@ rename_recursively(NODE *start, const char *from, const char *to)
 			}
 			sprintf(newName, "%s%s", to, individualName);
 		}
+		log ("new name: '%s'", newName);
 		correct_hardlinks_to_node(root, node->name, newName);
 		free(node->name);
 		node->name = newName;
 		node->basename = strrchr(node->name, '/') + 1;
 		node->namechanged = 1;
-		/* iterate */
-		node = node->hh.next;
+		insert_by_path(root, node);
 	}
 	return ret;
 }
@@ -735,22 +773,17 @@ rename_recursively(NODE *start, const char *from, const char *to)
 static int
 get_temp_file_name(const char *path, char **location)
 {
-	char *tmppath;
-	char *tmp;
 	int fh;
 
 	/* create name for temp file */
-	tmp = tmppath = strdup(path);
-	do if (*tmp == '/') *tmp = '_'; while (*(tmp++));
 	if ((*location = (char *)malloc(
 				strlen(P_tmpdir) +
-				strlen("_archivemount") +
-				strlen(tmppath) + 8)) == NULL) {
+				strlen("/archivemount_XXXXXX") +
+				1)) == NULL) {
 		log("Out of memory");
 		return -ENOMEM;
 	}
-	sprintf(*location, "%s/archivemount%s_XXXXXX", P_tmpdir, tmppath);
-	free(tmppath);
+	sprintf(*location, "%s/archivemount_XXXXXX", P_tmpdir);
 	if ((fh = mkstemp(*location))  == -1) {
 		log("Could not create temp file name %s: %s",
 			*location, strerror(errno));
@@ -862,7 +895,6 @@ write_new_modded_file(NODE *node, struct archive_entry *wentry,
 		}
 	} else {
 		/* no data, only write header (e.g. when node is a link!) */
-		/* FIXME: hardlinks are saved, symlinks not. why??? */
 		//log("writing header for file %s", archive_entry_pathname(wentry));
 		archive_write_header(newarc, wentry);
 	}
@@ -921,20 +953,27 @@ save(const char *archiveFile)
 		log("%s", archive_error_string(oldarc));
 		return archive_errno(oldarc);
 	}
-	if (archive_read_open_fd(oldarc, archiveFd, 10240) != ARCHIVE_OK) {
+	if (options.password) {
+		if (archive_read_add_passphrase(oldarc, user_passphrase) != ARCHIVE_OK) {
+			fprintf(stderr, "%s\n", archive_error_string(oldarc));
+			return archive_errno(oldarc);
+		}
+	}
+	if (archive_read_open_fd(oldarc, archiveFd, BLOCK_SIZE) != ARCHIVE_OK) {
 		log("%s", archive_error_string(oldarc));
 		return archive_errno(oldarc);
 	}
+        /* Read first header of oldarc so that archive format is set. */
+        if (archive_read_next_header(oldarc, &entry) != ARCHIVE_OK) {
+		log("%s", archive_error_string(oldarc));
+		return archive_errno(oldarc);
+        }
 	format = archive_format(oldarc);
 	compression = archive_filter_code(oldarc, 0);
-	/*
-	   log("format of old archive is %s (%d)",
-	   archive_format_name(oldarc),
-	   format);
-	   log("compression of old archive is %s (%d)",
-	   archive_compression_name(oldarc),
-	   compression);
-	   */
+        log("mounted archive format is %s (0x%x)",
+            archive_format_name(oldarc), format);
+        log("mounted archive compression is %s (0x%x)",
+            archive_filter_name(oldarc, 0), compression);
 	/* open new archive */
 	if ((newarc = archive_write_new()) == NULL) {
 		log("Out of memory");
@@ -953,38 +992,7 @@ save(const char *archiveFile)
 			archive_write_add_filter_none(newarc);
 			break;
 	}
-#if 0
 	if (archive_write_set_format(newarc, format) != ARCHIVE_OK) {
-		return -ENOTSUP;
-	}
-#endif
-	if (format & ARCHIVE_FORMAT_CPIO
-		|| format & ARCHIVE_FORMAT_CPIO_POSIX)
-	{
-		archive_write_set_format_cpio(newarc);
-		//log("set write format to posix-cpio");
-	} else if (format & ARCHIVE_FORMAT_SHAR
-		|| format & ARCHIVE_FORMAT_SHAR_BASE
-		|| format & ARCHIVE_FORMAT_SHAR_DUMP)
-	{
-		archive_write_set_format_shar(newarc);
-		//log("set write format to binary shar");
-	} else if (format & ARCHIVE_FORMAT_TAR_PAX_RESTRICTED)
-	{
-		archive_write_set_format_pax_restricted(newarc);
-		//log("set write format to binary pax restricted");
-	} else if (format & ARCHIVE_FORMAT_TAR_PAX_INTERCHANGE)
-	{
-		archive_write_set_format_pax(newarc);
-		//log("set write format to binary pax interchange");
-	} else if (format & ARCHIVE_FORMAT_TAR_USTAR
-		|| format & ARCHIVE_FORMAT_TAR
-		|| format & ARCHIVE_FORMAT_TAR_GNUTAR
-		|| format == 0)
-	{
-		archive_write_set_format_ustar(newarc);
-		//log("set write format to ustar");
-	} else {
 		log("writing archives of format %d (%s) is not "
 			"supported", format,
 			archive_format_name(oldarc));
@@ -997,11 +1005,25 @@ save(const char *archiveFile)
 		log("could not open new archive file for writing");
 		return 0 - errno;
 	}
+	if (options.password) {
+		/* When libarchive gains support for multiple kinds of encryption and
+		 * an API to say which kind is in use, this should use copy oldarc's
+		 * encryption settings.  For now, just set the one kind of encryption
+		 * that libarchive supports. */
+		if (archive_write_set_options(newarc, "zip:encryption=aes256") != ARCHIVE_OK) {
+			log("Could not set encryption for new archive: %s", archive_error_string(newarc));
+			return archive_errno(newarc);
+		}
+		if (archive_write_set_passphrase(newarc, user_passphrase) != ARCHIVE_OK) {
+			log("Could not set passphrase for new archive: %s", archive_error_string(newarc));
+			return archive_errno(newarc);
+		}
+	}
 	if (archive_write_open_fd(newarc, tempfile) != ARCHIVE_OK) {
 		log("%s", archive_error_string(newarc));
 		return archive_errno(newarc);
 	}
-	while (archive_read_next_header(oldarc, &entry) == ARCHIVE_OK) {
+	do {
 		off_t offset;
 		const void *buf;
 		struct archive_entry *wentry;
@@ -1048,10 +1070,10 @@ save(const char *archiveFile)
 		if (node->namechanged) {
 			if (*name == '/') {
 				archive_entry_set_pathname(
-					wentry, node->name);
+						wentry, node->name);
 			} else {
 				archive_entry_set_pathname(
-					wentry, node->name + 1);
+						wentry, node->name + 1);
 			}
 		} else {
 			archive_entry_set_pathname(wentry, name);
@@ -1073,9 +1095,12 @@ save(const char *archiveFile)
 		}
 		/* clean up */
 		archive_entry_free(wentry);
-	} /* end: while read next header */
+	} while (archive_read_next_header(oldarc, &entry) == ARCHIVE_OK);
 	/* find new files to add (those do still have modified flag set */
 	while ((node = find_modified_node(root))) {
+		if (node->namechanged) {
+			correct_name_in_entry (node);
+		}
 		write_new_modded_file(node, node->entry, newarc);
 	}
 	/* clean up, re-open the new archive for reading */
@@ -1150,8 +1175,14 @@ _ar_open_raw(void)
 			archive_error_string(rawcache->archive), archive_ret);
 		return -EIO;
 	}
+	if (options.password) {
+		if (archive_read_add_passphrase(rawcache->archive, user_passphrase) != ARCHIVE_OK) {
+			fprintf(stderr, "%s\n", archive_error_string(rawcache->archive));
+			return archive_errno(rawcache->archive);
+		}
+	}
 
-	archive_ret = archive_read_open_fd(rawcache->archive, archiveFd, 10240);
+	archive_ret = archive_read_open_fd(rawcache->archive, archiveFd, BLOCK_SIZE);
 	if (archive_ret != ARCHIVE_OK) {
 		log("archive_read_open_fd(): %s (%d)\n",
 			archive_error_string(rawcache->archive), archive_ret);
@@ -1323,7 +1354,13 @@ _ar_read(const char *path, char *buf, size_t size, off_t offset,
 				return -EIO;
 			}
 		}
-		archive_ret = archive_read_open_fd(archive, archiveFd, 10240);
+		if (options.password) {
+			if (archive_read_add_passphrase(archive, user_passphrase) != ARCHIVE_OK) {
+				fprintf(stderr, "%s\n", archive_error_string(archive));
+				return archive_errno(archive);
+			}
+		}
+		archive_ret = archive_read_open_fd(archive, archiveFd, BLOCK_SIZE);
 		if (archive_ret != ARCHIVE_OK) {
 			log("archive_read_open_fd(): %s (%d)\n",
 				archive_error_string(archive), archive_ret);
@@ -1448,7 +1485,14 @@ _ar_getsizeraw(const char *path)
 		options.formatraw = 1;
 	}
 
-	archive_ret = archive_read_open_fd(archive, archiveFd, 10240);
+	if (options.password) {
+		if (archive_read_add_passphrase(archive, user_passphrase) != ARCHIVE_OK) {
+			fprintf(stderr, "%s\n", archive_error_string(archive));
+			return archive_errno(archive);
+		}
+	}
+
+	archive_ret = archive_read_open_fd(archive, archiveFd, BLOCK_SIZE);
 	if (archive_ret != ARCHIVE_OK) {
 		log("archive_read_open_fd(): %s (%d)\n",
 			archive_error_string(archive), archive_ret);
@@ -1530,6 +1574,19 @@ _ar_getattr(const char *path, struct stat *stbuf)
 	}
 	stbuf->st_blocks  = (stbuf->st_size + 511) / 512;
 	stbuf->st_blksize = 4096;
+	/* when sharing via Samba nlinks have to be at
+	   least 2 for directories or directories will
+	   be shown as files, and 1 for files or they
+	   cannot be opened */
+	if (S_ISDIR(archive_entry_mode(node->entry))) {
+		if (stbuf->st_nlink < 2) {
+			stbuf->st_nlink = 2;
+		}
+	} else {
+		if (stbuf->st_nlink < 1) {
+			stbuf->st_nlink = 1;
+		}
+	}
 
 	if (options.readonly) {
 		stbuf->st_mode = stbuf->st_mode & 0777555;
@@ -1688,8 +1745,7 @@ ar_symlink(const char *from, const char *to)
 	struct passwd *pwd;
 	struct group *grp;
 
-	return -ENOSYS; /* somehow saving symlinks does not work. The code below is ok.. see write_new_modded_file() */
-	//log("symlink called, %s -> %s", from, to);
+	log("symlink called, %s -> %s", from, to);
 	if (! archiveWriteable || options.readonly) {
 		return -EROFS;
 	}
@@ -2404,7 +2460,6 @@ ar_rename(const char *from, const char *to)
 {
 	NODE *from_node;
 	int ret = 0;
-	char *old_name;
 	char *temp_name;
 
 	log("ar_rename called, from: '%s', to: '%s'", from, to);
@@ -2429,11 +2484,6 @@ ar_rename(const char *from, const char *to)
 			}
 		}
 	}
-	if (from_node->child) {
-		/* it is a directory, recursive change of all from_nodes
-		 * below it is required */
-		ret = rename_recursively(from_node->child, from, to);
-	}
 	/* meta data is changed in save() */
 	/* change from_node name */
 	if (*to != '/') {
@@ -2450,15 +2500,21 @@ ar_rename(const char *from, const char *to)
 			return -ENOMEM;
 		}
 	}
-	old_name = from_node->name;
+	remove_child(from_node);
+	correct_hardlinks_to_node(root, from_node->name, temp_name);
+	free(from_node->name);
 	from_node->name = temp_name;
 	from_node->basename = strrchr(from_node->name, '/') + 1;
 	from_node->namechanged = 1;
-	correct_name_in_entry (from_node);
-	remove_child(from_node);
 	ret = insert_by_path(root, from_node);
-	correct_hardlinks_to_node(root, old_name, from_node->name);
-	free(old_name);
+	if (0 != ret) {
+		log ("failed to re-insert node %s", from_node->name);
+	}
+	if (from_node->child) {
+		/* it is a directory, recursive change of all from_nodes
+		 * below it is required */
+		ret = rename_recursively(from_node->child, from, to);
+	}
 	archiveModified = 1;
 	pthread_mutex_unlock(&lock);
 	return ret;
@@ -2724,6 +2780,56 @@ showUsage()
 	fprintf(stderr, "Usage:	      (-v|--version)\n");
 }
 
+void setEcho(int echo)
+{
+	struct termios t;
+	tcgetattr(STDIN_FILENO, &t);
+	t.c_lflag = (t.c_lflag & ~ECHO) | (echo ? ECHO : 0);
+	tcsetattr(STDIN_FILENO, TCSANOW, &t);
+}
+
+/* This is basically getline(3), re-implemented to avoid requiring
+ * _POSIX_C_SOURCE >= 200809L. */
+ssize_t getLine(char **lineptr, size_t *n, FILE *stream) {
+	const int delim = '\n';
+	int can_realloc = 0;
+	ssize_t count = 0;
+	if (*lineptr == NULL && *n == 0) {
+		can_realloc = 1;
+		*n = 16;
+		*lineptr = malloc(*n);
+		if (*lineptr == NULL) return -1;
+	}
+	for (;;) {
+		if (count >= *n - 1) {
+			if (can_realloc) {
+				*n *= 2;
+				lineptr = realloc(lineptr, *n);
+				if (*lineptr == NULL) return -1;
+			} else {
+				(*lineptr)[*n] = '\0';
+				return *n;
+			}
+		}
+		int c = fgetc(stream);
+		switch (c) {
+			default:    (*lineptr)[count++] = c;    break;
+			case delim: (*lineptr)[count++] = c;    /* fall through */
+			case EOF:   (*lineptr)[count]   = '\0';
+			            return (c == delim || feof(stream)) ? count : -1;
+		}
+	}
+}
+
+ssize_t getPassphrase(char **lineptr, size_t *n, FILE *stream) {
+	ssize_t ret = getLine(lineptr, n, stream);
+	/* Strip newline off the end */
+	if (ret > 0 && (*lineptr)[ret - 1] == '\n') {
+		(*lineptr)[--ret] = '\0';
+	}
+	return ret;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -2755,6 +2861,14 @@ main(int argc, char **argv)
 		fprintf(stderr, "Problem with mountpoint: %s\n",
 			strerror(ENOTDIR));
 		exit(EXIT_FAILURE);
+	}
+
+	if (options.password) {
+		setEcho(0);
+		fputs("Enter passphrase:", stderr);
+		getPassphrase(&user_passphrase, &user_passphrase_size, stdin);
+		fputs("\n", stderr);
+		setEcho(1);
 	}
 
 	if (!options.readonly) {
@@ -2887,6 +3001,10 @@ main(int argc, char **argv)
 
 	/* clean up */
 	close(archiveFd);
+	if (options.password) {
+		memset(user_passphrase, 0, user_passphrase_size);
+		free(user_passphrase);
+	}
 
 	return EXIT_SUCCESS;
 }
