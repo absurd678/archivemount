@@ -26,8 +26,6 @@
 
 #define BLOCK_SIZE 10240
 
-#include "config.h"
-
 #include <fuse.h>
 #include <fuse/fuse_lowlevel.h>
 #include <fuse_opt.h>
