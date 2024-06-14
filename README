@@ -1,31 +1,41 @@
 What is it
 ----------
-Archivemount is a piece of glue code between libarchive
-(http://people.freebsd.org/~kientzle/libarchive/) and FUSE
-(http://fuse.sourceforge.net). It can be used to mount a (possibly compressed)
-archive (as in .tar.gz or .tar.bz2) and use it like an ordinary filesystem.
+Archivemount is a piece of glue code between libarchive <http://libarchive.org/>
+and FUSE <http://fuse.sourceforge.net>. It can be used to mount a (possibly compressed)
+archive (as in .tar.gz or .zip or .iso) and use it like an ordinary filesystem.
 
 Requirements
 ------------
-You will need autoconf, libarchive-dev and libfuse-dev for building
-archivemont, as well as GNU make and gcc of course.
+You will need GNU Make, libarchive-dev, libfuse-dev, and pkgconf
+(or just the libraries and fix up cc *.c manually).
 
-Installation
+-ng
 ------------
-From version 0.6.0 on archivemount uses autoconf, so just do the normal
+Debian bugs:
+  [ ] #799563: Failed to list correctly the files when parent directory name and child directory names are the same
+  [ ] #687710: cannot read ISO-9660 archives
+  [ ] #832823: new upstream version (0.8.7)
+  [ ] #838597: Unmount instructions in man page lead to "Permission denied" error.
+  [ ] #891749: New upstream version (0.8.9)
+  [ ] #974679: Wrong homepage + new version
+  [ ] #651442: does not handle compressed (single) files
+  [ ] #857985: appears a kernel upgrade changed the ABI unexpectedly
+  [ ] #674231: Add 7zip support
 
-autoreconf -i
-./configure && make && sudo make install
-
-to build archivemount and install it to /usr/local. For building it,
-libfuse is needed in version 2.6 or higher, including its headerfiles
-of course (on most distributions those can be found in a package named
-something like libfuse-dev or so).
-
-Usage
------
-archivemount <options> <archive> <mountpoint>
-Options are the normal fuse mount options, nothing special supported yet.
+Upstream (https://github.com/cybernoid/archivemount) bugs:
+  [ ] #28: Chokes on CSRG ISO
+  [ ] #21: Quadratic complexity when reading large entries
+  [ ] #27: fuse.pc is fuse3.pc nowadays
+  [ ] #26: feature request: zstd support
+  [ ] #25: archivemount can't read .img.gz
+  [ ] #23: feature request: .xz compressed files support?
+  [ ] #14: Create a table which shows supported formats && read / write support
+  [ ] #17: Update homepage in apt show archivemount
+PRs:
+  [ ] #22: Add support for fuse3
+  [ ] #20: Add support for /dev/fd/%u mountpoints
+  [ ] #19: Don't fchdir at unmount when mounting read-only
+  [ ] #18: Honor raw archives' pathname
 
 Write support
 -------------
@@ -55,4 +65,3 @@ formats for reading than it does for writing. Archivemount tries to do a
 sensible conversion here when writing the changed archive because I think most
 people do not care a lot about the exact version of tar used inside the .tgz
 file as long as their favourite archive tool can still cope with the file.
-
