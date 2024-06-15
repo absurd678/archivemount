@@ -147,13 +147,13 @@ static size_t user_passphrase_size = 0;
 static pthread_mutex_t lock; /* global node tree lock */
 
 /* Taken from the GNU under the GPL */
-char * strchrnul(const char * s, int c_in) {
-	char c = c_in;
-	while(*s && (*s != c))
-		s++;
-
-	return (char *)s;
-}
+//char * strchrnul(const char * s, int c_in) {
+//	char c = c_in;
+//	while(*s && (*s != c))
+//		s++;
+//
+//	return (char *)s;
+//}
 
 /**********************/
 /* internal functions */
@@ -187,10 +187,9 @@ static void usage(const char * progname) {
 	        progname);
 }
 
-static const struct fuse_operations ar_oper;
-
 static int ar_opt_proc(void * data, const char * arg, int key, struct fuse_args * outargs) {
 	(void)data;
+	struct fuse_operations faux_oper;
 
 	switch(key) {
 		case FUSE_OPT_KEY_OPT:
@@ -208,13 +207,13 @@ static int ar_opt_proc(void * data, const char * arg, int key, struct fuse_args 
 		case KEY_HELP:
 			usage(outargs->argv[0]);
 			fuse_opt_add_arg(outargs, "-ho");
-			fuse_main(outargs->argc, outargs->argv, &ar_oper, NULL);
+			fuse_main(outargs->argc, outargs->argv, &faux_oper, NULL);
 			exit(1);
 
 		case KEY_VERSION:
 			fprintf(stderr, "archivemount version %s\n", VERSION);
 			fuse_opt_add_arg(outargs, "--version");
-			fuse_main(outargs->argc, outargs->argv, &ar_oper, NULL);
+			fuse_main(outargs->argc, outargs->argv, &faux_oper, NULL);
 			exit(0);
 
 		default:
@@ -226,7 +225,7 @@ static int ar_opt_proc(void * data, const char * arg, int key, struct fuse_args 
 static NODE * init_node() {
 	NODE * node;
 
-	if((node = malloc(sizeof(NODE))) == NULL) {
+	if((node = (NODE *)malloc(sizeof(NODE))) == NULL) {
 		lerrno();
 		return NULL;
 	}
@@ -290,7 +289,8 @@ static int insert_by_path(NODE * root, NODE * node) {
 
 		strncpy(nam, key, namlen);
 		nam[namlen]   = '\0';
-		NODE ** found = tfind(&(struct falsenode){.basename = nam}, &cur->children, compar);
+		struct falsenode tmpkey = {.basename = nam};
+		NODE ** found = (NODE **)tfind(&tmpkey, &cur->children, compar);
 		if(found) {
 			cur = *found;
 		} else {
@@ -321,7 +321,7 @@ static int insert_by_path(NODE * root, NODE * node) {
 	}
 	if(S_ISDIR(archive_entry_mode(cur->entry))) {
 		/* check if a child of this name already exists */
-		NODE ** found = tfind(node, &cur->children, compar);
+		NODE ** found = (NODE **)tfind(node, &cur->children, compar);
 
 		if(found) {
 			/* this is a dupe due to a temporarily inserted
@@ -363,7 +363,7 @@ static int build_tree(const char * mtpt) {
 #endif
 		if((regex_error = regcomp(&subtree, subtree_filter, REG_ENHANCED))) {
 			int es = regerror(regex_error, &subtree, NULL, 0);
-			char * eb = malloc(es);
+			auto eb = (char *)malloc(es);
 			if(eb)
 				regerror(regex_error, &subtree, eb, es);
 			lerr("regex error%s%s\n", eb ? ": " : "", eb);
@@ -557,7 +557,7 @@ static int compar_first(const void * l, const void * r) {
 	return 0;
 }
 static NODE * firstchild(NODE * node) {
-	NODE ** ret = tfind(NULL, &node->children, compar_first);
+	NODE ** ret = (NODE **)tfind(NULL, &node->children, compar_first);
 	return ret ? *ret : NULL;
 }
 
@@ -598,7 +598,8 @@ static NODE * get_node_for_path(NODE * start, const char * path) {
 		// NB: not thread-safe
 		if(last)
 			*(char *)baseend = '\0';
-		NODE ** found = tfind(&(struct falsenode){.basename = basename}, &start->children, compar);
+		struct falsenode tmpkey = {.basename = basename};
+		NODE ** found = (NODE **)tfind(&tmpkey, &start->children, compar);
 		if(last)
 			*(char *)baseend = last;
 		if(found)
