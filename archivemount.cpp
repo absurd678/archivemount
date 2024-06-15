@@ -34,16 +34,17 @@
 #include <fuse/fuse_lowlevel.h>
 #include <fuse_opt.h>
 #include <grp.h>
+#include <map>
+#include <new>
 #include <pthread.h>
 #include <pwd.h>
 #include <regex.h>
-#include <search.h>
-#include <setjmp.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string_view>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
@@ -71,24 +72,17 @@
 /*******************/
 
 typedef struct node {
-	char * basename; /* every after the last '/' */
 	// ^ must be first
 	struct node * parent;
-	void * children;              /* tsearch(3) tree */
 	char * name;                  /* fully qualified with prepended '/' */
+	std::string_view basename;    /* every after the last '/'; substring of name */
 	char * location;              /* location on disk for new/modified files, else NULL */
 	struct archive_entry * entry; /* libarchive header data */
+	std::map<std::string_view, node *> children; /* basename -> node */
 	bool namechanged;             /* true when file was renamed */
 	bool modified;                /* true when node was modified */
 } NODE;
-struct falsenode {
-	const char * basename;
-	// ^ must be first
-};
 
-static int compar(const void * l, const void * r) {
-	return strcmp(((NODE *)l)->basename, ((NODE *)r)->basename);
-}
 
 struct options {
 	int readonly;
@@ -145,15 +139,6 @@ static const char * archiveFile    = NULL;
 static char * user_passphrase      = NULL;
 static size_t user_passphrase_size = 0;
 static pthread_mutex_t lock; /* global node tree lock */
-
-/* Taken from the GNU under the GPL */
-//char * strchrnul(const char * s, int c_in) {
-//	char c = c_in;
-//	while(*s && (*s != c))
-//		s++;
-//
-//	return (char *)s;
-//}
 
 /**********************/
 /* internal functions */
@@ -230,17 +215,11 @@ static NODE * init_node() {
 		return NULL;
 	}
 
-	node->parent      = NULL;
-	node->children    = NULL;
-	node->name        = NULL;
-	node->basename    = NULL;
-	node->location    = NULL;
-	node->namechanged = false;
-	node->entry       = archive_entry_new();
-	node->modified    = 0;
+	node = new (node) NODE{.entry = archive_entry_new()};
 
 	if(node->entry == NULL) {
 		lerrno();
+		node->~node();
 		free(node);
 		return NULL;
 	}
@@ -251,14 +230,14 @@ static NODE * init_node() {
 static void free_node(NODE * node) {
 	free(node->name);
 	archive_entry_free(node->entry);
-	tdestroy(node->children, (void (*)(void *))free_node);
+	node->~node();
 	free(node);
 }
 
 
 static void remove_child(NODE * node) {
 	if(node->parent) {
-		tdelete(node, &node->parent->children, compar);
+		node->parent->children.erase(node->basename);
 		log("removed '%s' from parent '%s'", node->name, node->parent->name);
 	} else {
 		root = NULL;
@@ -267,7 +246,7 @@ static void remove_child(NODE * node) {
 
 static void insert_as_child(NODE * node, NODE * parent) {
 	node->parent = parent;
-	tsearch(node, &parent->children, compar);
+	parent->children.insert({node->basename, node});
 	log("inserted '%s' as child of '%s'", node->name, parent->name);
 }
 
@@ -284,22 +263,18 @@ static int insert_by_path(NODE * root, NODE * node) {
 	key++;
 	while((temp = strchr(key, '/'))) {
 		size_t namlen = temp - key;
-		char nam[namlen + 1];
 		NODE * last = cur;
 
-		strncpy(nam, key, namlen);
-		nam[namlen]   = '\0';
-		struct falsenode tmpkey = {.basename = nam};
-		NODE ** found = (NODE **)tfind(&tmpkey, &cur->children, compar);
-		if(found) {
-			cur = *found;
+		std::string_view basename{key, namlen};
+		if(auto found = cur->children.find(basename); found != std::end(cur->children)) {
+			cur = found->second;
 		} else {
 			/* parent path not found, create a temporary one */
 			NODE * tempnode;
 			if((tempnode = init_node()) == NULL)
 				return -ENOMEM;
 
-			if(asprintf(&tempnode->name, "%s/%s", last != root ? last->name : "", nam) == -1) {
+			if(asprintf(&tempnode->name, "%s/%.*s", last != root ? last->name : "", (int)basename.size(), basename.data()) == -1) {
 				lerrno();
 				return -errno;
 			}
@@ -321,13 +296,13 @@ static int insert_by_path(NODE * root, NODE * node) {
 	}
 	if(S_ISDIR(archive_entry_mode(cur->entry))) {
 		/* check if a child of this name already exists */
-		NODE ** found = (NODE **)tfind(node, &cur->children, compar);
+		auto found = cur->children.find(node->basename);
 
-		if(found) {
+		if(found != std::end(cur->children)) {
 			/* this is a dupe due to a temporarily inserted
 			   node, just update the entry */
 			archive_entry_free(node->entry);
-			if((node->entry = archive_entry_clone((*found)->entry)) == NULL) {
+			if((node->entry = archive_entry_clone(found->second->entry)) == NULL) {
 				lerrno();
 				return -errno;
 			}
@@ -501,68 +476,37 @@ static int build_tree(const char * mtpt) {
 	}
 	return 0;
 }
-static NODE * find_modified_node_found_data;
-static jmp_buf find_modified_node_found_jmp;
-static void find_modified_node_find(const void * nodep, VISIT which, int depth) {
-	(void)depth;
-	if(which != leaf && which != preorder)
-		return;
-	NODE * node = *(NODE * const *)nodep;
 
-	if(node->modified) {
-		find_modified_node_found_data = node;
-		longjmp(find_modified_node_found_jmp, 1);
-	}
-
-	if(node->children)
-		twalk(node->children, find_modified_node_find);
-}
 static NODE * find_modified_node(NODE * start) {
 	if(start->modified)
 		return start;
 
-	if(start->children) {
-		if(setjmp(find_modified_node_found_jmp))
-			return find_modified_node_found_data;
-		twalk(start->children, find_modified_node_find);
+	for(auto && [_, child] : start->children) {
+		if(auto ret = find_modified_node(child))
+			return ret;
 	}
 	return NULL;
 }
 
-static const char * correct_hardlinks_to_node_old_name;
-static const char * correct_hardlinks_to_node_new_name;
-static void correct_hardlinks_to_node_find(const void * nodep, VISIT which, int depth) {
-	(void)depth;
-	if(which != leaf && which != preorder)
-		return;
-	NODE * run = *(NODE * const *)nodep;
+static void correct_hardlinks_to_node(const char * old_name, const char * new_name, NODE * from = root) {
+	for(auto && [_, child] : from->children) {
+		const char * tmp = archive_entry_hardlink(child->entry);
+		if(tmp && strcmp(tmp, old_name) == 0) {
+			/* the child in "child" is a hardlink to "child", correct the path */
+			// log("correcting hardlink '%s' from '%s' to '%s'", child->name, old_name, new_name);
+			archive_entry_set_hardlink(child->entry, new_name);
+		}
 
-	const char * tmp = archive_entry_hardlink(run->entry);
-	if(tmp && strcmp(tmp, correct_hardlinks_to_node_old_name) == 0) {
-		/* the run in "run" is a hardlink to "run", correct the path */
-		// log("correcting hardlink '%s' from '%s' to '%s'", run->name, correct_hardlinks_to_node_old_name, correct_hardlinks_to_node_new_name);
-		archive_entry_set_hardlink(run->entry, correct_hardlinks_to_node_new_name);
+		correct_hardlinks_to_node(old_name, new_name, child);
 	}
-	if(run->children)
-		twalk(run->children, correct_hardlinks_to_node_find);
-}
-static void correct_hardlinks_to_node(const char * old_name, const char * new_name) {
-	correct_hardlinks_to_node_old_name = old_name;
-	correct_hardlinks_to_node_new_name = new_name;
-	twalk(root->children, correct_hardlinks_to_node_find);
 }
 
-static int compar_first(const void * l, const void * r) {
-	(void)l, (void)r;
-	return 0;
-}
 static NODE * firstchild(NODE * node) {
-	NODE ** ret = (NODE **)tfind(NULL, &node->children, compar_first);
-	return ret ? *ret : NULL;
+	return std::begin(node->children)->second;
 }
 
 static void correct_name_in_entry(NODE * node) {
-	if(root->children && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
+	if(!root->children.empty() && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
 		log("correcting name in entry to '%s'", node->name + 1);
 		archive_entry_set_pathname(node->entry, node->name + 1);
 	} else {
@@ -581,85 +525,48 @@ static NODE * get_node_for_path(NODE * start, const char * path) {
 	}
 
 	/* Check if one of the children match */
-	if(start->children) {
-		const char * basename;
-		const char * baseend;
-
+	if(!start->children.empty()) {
 		/* Find the part of the path we are now looking for */
-		basename = path + strlen(start->name) - (*path == '/' ? 0 : 1);
-		if(*basename == '/')
+		const char * basename = path + strlen(start->name) - (*path == '/' ? 0 : 1);
+		if(basename[0] == '/')
 			basename++;
 
-		baseend   = strchrnul(basename, '/');
-		char last = *baseend;
+		std::string_view bname{basename};
+		if(auto idx = bname.find('/'); idx != std::string_view::npos)
+			bname.remove_suffix(bname.size() - idx);
 
 		// log("get_node_for_path path: '%s' start: '%s' basename: '%s' len: %ld", path, start->name, basename, baseend - basename);
-
-		// NB: not thread-safe
-		if(last)
-			*(char *)baseend = '\0';
-		struct falsenode tmpkey = {.basename = basename};
-		NODE ** found = (NODE **)tfind(&tmpkey, &start->children, compar);
-		if(last)
-			*(char *)baseend = last;
-		if(found)
-			return get_node_for_path(*found, path);
+		auto found = start->children.find(bname);
+		if(found != std::end(start->children))
+			return get_node_for_path(found->second, path);
 	}
 
 	// log("  get_node_for_path path: '%s' start: '%s' return: '%s'", path, start->name, ret == NULL ? "(null)" : ret->name);
 	return NULL;
 }
 
-static NODE * get_node_for_entry_found_data;
-static const char * get_node_for_entry_found_path;
-static jmp_buf get_node_for_entry_found_jmp;
-static void get_node_for_entry_find(const void * nodep, VISIT which, int depth) {
-	(void)depth;
-	if(which != leaf && which != preorder)
-		return;
-	NODE * run = *(NODE * const *)nodep;
+static NODE * get_node_for_entry_inner(NODE * under, const char * path) {
+	for(auto && [_, child] : under->children) {
+		const char * name = archive_entry_pathname(child->entry);
+		if(*name == '/')
+			++name;
 
-	const char * name = archive_entry_pathname(run->entry);
-	if(*name == '/')
-		++name;
+		if(!strcmp(path, name))
+			return child;
 
-	if(!strcmp(get_node_for_entry_found_path, name)) {
-		get_node_for_entry_found_data = run;
-		longjmp(get_node_for_entry_found_jmp, 1);
+		if(auto ret = get_node_for_entry_inner(child, path))
+			return ret;
 	}
-	if(run->children)
-		twalk(run->children, get_node_for_entry_find);
-}
-static NODE * get_node_for_entry(NODE * under, struct archive_entry * entry) {
-	get_node_for_entry_found_path = archive_entry_pathname(entry);
-	if(*get_node_for_entry_found_path == '/')
-		++get_node_for_entry_found_path;
-
-	if(setjmp(get_node_for_entry_found_jmp))
-		return get_node_for_entry_found_data;
-
-	get_node_for_entry_find(&under, preorder, 0);
 	return NULL;
 }
+static NODE * get_node_for_entry(NODE * under, struct archive_entry * entry) {
+	const char * path = archive_entry_pathname(entry);
+	if(*path == '/')
+		++path;
 
-static size_t rename_recursively_count_count;
-static void rename_recursively_count_find(const void * nodep, VISIT which, int depth) {
-	(void)nodep;
-	(void)depth;
-	if(which != leaf && which != preorder)
-		return;
-
-	++rename_recursively_count_count;
+	return get_node_for_entry_inner(under, path);
 }
-static NODE ** rename_recursively_accumulate_list;
-static void rename_recursively_accumulate_find(const void * nodep, VISIT which, int depth) {
-	(void)depth;
-	if(which != leaf && which != preorder)
-		return;
-	NODE * node = *(NODE * const *)nodep;
 
-	*rename_recursively_accumulate_list++ = node;
-}
 static int rename_recursively(NODE * under, const char * from, const char * to) {
 	char * individualName;
 	char * newName;
@@ -667,18 +574,16 @@ static int rename_recursively(NODE * under, const char * from, const char * to) 
 	/* removing and re-inserting nodes while iterating through
 	   the hashtable is a bad idea, so we copy all node ptrs
 	   into an array first and iterate over that instead */
-	rename_recursively_count_count = 0;
-	twalk(under->children, rename_recursively_count_find);
-	size_t count = rename_recursively_count_count;
-
-	NODE * nodes[count];
-	rename_recursively_accumulate_list = nodes;
+	size_t count = under->children.size();
 	log("%s has %zu items", under->name, count);
-	twalk(under->children, rename_recursively_accumulate_find);
+
+	auto nodes = (NODE **)alloca(sizeof(NODE *) * count), itr = nodes;
+	for(auto && [_, child] : under->children)
+		*itr++ = child;
 
 	for(size_t i = 0; i < count; ++i) {
 		NODE * node = nodes[i];
-		if(node->children)
+		if(!node->children.empty())
 			ret = rename_recursively(node, from, to);
 
 		remove_child(node);
@@ -1341,7 +1246,7 @@ static int _ar_getattr(const char * path, struct stat * stbuf) {
 		ret = _ar_getattr(archive_entry_hardlink(node->entry), stbuf);
 		return ret;
 	}
-	if(options.formatraw && !node->children) {
+	if(options.formatraw && node->children.empty()) {
 		fstat(archiveFd, stbuf);
 		size = rawcache.st.st_size;
 		if(size < 0)
@@ -1349,7 +1254,7 @@ static int _ar_getattr(const char * path, struct stat * stbuf) {
 		stbuf->st_size = size;
 	} else {
 		memcpy(stbuf, archive_entry_stat(node->entry), sizeof(struct stat));
-		if(options.formatraw && node->children)
+		if(options.formatraw && !node->children.empty())
 			stbuf->st_size = 4096;
 	}
 	stbuf->st_blocks  = (stbuf->st_size + 511) / 512;
@@ -1430,7 +1335,7 @@ static int ar_mkdir(const char * path, mode_t mode) {
 	node->basename    = strrchr(node->name, '/') + 1;
 	node->namechanged = false;
 	/* build entry */
-	if(root->children && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
+	if(!root->children.empty() && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
 		archive_entry_set_pathname(node->entry, node->name + 1);
 	} else {
 		archive_entry_set_pathname(node->entry, node->name);
@@ -1475,7 +1380,7 @@ static int ar_rmdir(const char * path) {
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
-	if(node->children) {
+	if(!node->children.empty()) {
 		pthread_mutex_unlock(&lock);
 		return -ENOTEMPTY;
 	}
@@ -1542,7 +1447,7 @@ static int ar_symlink(const char * from, const char * to) {
 	st.st_blocks  = 0;
 	st.st_atime = st.st_ctime = st.st_mtime = time(NULL);
 	/* build entry */
-	if(root->children && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
+	if(!root->children.empty() && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
 		archive_entry_set_pathname(node->entry, node->name + 1);
 	} else {
 		archive_entry_set_pathname(node->entry, node->name);
@@ -1901,7 +1806,7 @@ static int ar_mknod(const char * path, mode_t mode, dev_t rdev) {
 	node->basename = strrchr(node->name, '/') + 1;
 
 	/* build entry */
-	if(root->children && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
+	if(!root->children.empty() && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
 		archive_entry_set_pathname(node->entry, node->name + 1);
 	} else {
 		archive_entry_set_pathname(node->entry, node->name);
@@ -2140,7 +2045,7 @@ static int ar_rename(const char * from, const char * to) {
 	if(0 != ret) {
 		log("failed to re-insert node %s", from_node->name);
 	}
-	if(from_node->children) {
+	if(!from_node->children.empty()) {
 		/* it is a directory, recursive change of all from_nodes
 		 * below it is required */
 		ret = rename_recursively(from_node, from, to);
@@ -2221,35 +2126,6 @@ static int ar_release(const char * path, struct fuse_file_info * fi) {
 	return 0;
 }
 
-static void * ar_readdir_find_buf;
-static fuse_fill_dir_t ar_readdir_find_filler;
-static jmp_buf ar_readdir_find_jmp;
-static void ar_readdir_find(const void * nodep, VISIT which, int depth) {
-	(void)depth;
-	if(which != leaf && which != preorder)
-		return;
-	NODE * node = *(NODE * const *)nodep;
-
-	const struct stat * st;
-	if(archive_entry_hardlink(node->entry)) {
-		/* file is a hardlink, stat'ing it somehow does not
-		 * work; stat the original instead */
-		NODE * orig = get_node_for_path(root, archive_entry_hardlink(node->entry));
-		if(!orig)
-			longjmp(ar_readdir_find_jmp, ENOENT);
-		st = archive_entry_stat(orig->entry);
-	} else {
-		st = archive_entry_stat(node->entry);
-	}
-	/* Make a copy so we can set blocks/blksize. These are not
-	 * set by libarchive. https://github.com/libarchive/libarchive/issues/302 */
-	struct stat st_copy = *st;
-	st_copy.st_blocks   = (st_copy.st_size + 511) / 512;
-	st_copy.st_blksize  = 4096;
-
-	if(ar_readdir_find_filler(ar_readdir_find_buf, node->basename, &st_copy, 0))
-		longjmp(ar_readdir_find_jmp, ENOMEM);
-}
 static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info * fi) {
 	NODE * node;
 	(void)offset;
@@ -2271,14 +2147,31 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 	filler(buf, ".", NULL, 0);
 	filler(buf, "..", NULL, 0);
 
-	ar_readdir_find_buf    = buf;
-	ar_readdir_find_filler = filler;
-	int errnum;
-	if((errnum = setjmp(ar_readdir_find_jmp))) {
-		pthread_mutex_unlock(&lock);
-		return -errnum;
+	for(auto && [_, child] : node->children) {
+		const struct stat * st;
+		if(archive_entry_hardlink(child->entry)) {
+			/* file is a hardlink, stat'ing it somehow does not
+			 * work; stat the original instead */
+			NODE * orig = get_node_for_path(root, archive_entry_hardlink(child->entry));
+			if(!orig) {
+				pthread_mutex_unlock(&lock);
+				return -ENOENT;
+			}
+			st = archive_entry_stat(orig->entry);
+		} else {
+			st = archive_entry_stat(child->entry);
+		}
+		/* Make a copy so we can set blocks/blksize. These are not
+		 * set by libarchive. https://github.com/libarchive/libarchive/issues/302 */
+		struct stat st_copy = *st;
+		st_copy.st_blocks   = (st_copy.st_size + 511) / 512;
+		st_copy.st_blksize  = 4096;
+
+		if(filler(buf, child->basename.data(), &st_copy, 0)) {
+			pthread_mutex_unlock(&lock);
+			return -ENOMEM;
+		}
 	}
-	twalk(node->children, ar_readdir_find);
 
 	pthread_mutex_unlock(&lock);
 	return 0;
