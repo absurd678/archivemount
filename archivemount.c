@@ -41,6 +41,7 @@
 #include <search.h>
 #include <setjmp.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,7 +53,6 @@
 #include <unistd.h>
 #include <utime.h>
 #include <wchar.h>
-#include <stdbool.h>
 
 /**********/
 /* macros */
@@ -76,8 +76,8 @@ typedef struct node {
 	char * name;                  /* fully qualified with prepended '/' */
 	char * location;              /* location on disk for new/modified files, else NULL */
 	struct archive_entry * entry; /* libarchive header data */
-	bool namechanged;              /* true when file was renamed */
-	bool modified;                 /* true when node was modified */
+	bool namechanged;             /* true when file was renamed */
+	bool modified;                /* true when node was modified */
 } NODE;
 struct falsenode {
 	const char * basename;
@@ -2377,7 +2377,7 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 
 
 static int ar_create(const char * path, mode_t mode, struct fuse_file_info * fi) {
-	(void) fi;
+	(void)fi;
 	NODE * node;
 	char * location;
 	int tmp;
@@ -2604,7 +2604,7 @@ int main(int argc, char ** argv) {
 #else
 		                         &foreground
 #endif
-		                         );
+		);
 		if(res == -1)
 			exit(1);
 
