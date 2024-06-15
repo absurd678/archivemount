@@ -22,7 +22,6 @@
 #endif
 
 #define FUSE_USE_VERSION 26
-#define MAXBUF 4096
 
 #define BLOCK_SIZE 10240
 
@@ -752,12 +751,12 @@ static int update_entry_stat(NODE * node) {
 /*
  * write a new or modified file to the new archive; used from save()
  */
+_Thread_local char temp_io_buf[64 * 1024];
 static void write_new_modded_file(NODE * node, struct archive_entry * wentry, struct archive * newarc) {
 	if(node->location) {
 		struct stat st;
 		int fh       = 0;
 		off_t offset = 0;
-		void * buf;
 		ssize_t len = 0;
 		/* copy stat info */
 		if(lstat(node->location, &st) != 0) {
@@ -775,15 +774,10 @@ static void write_new_modded_file(NODE * node, struct archive_entry * wentry, st
 		archive_write_header(newarc, wentry);
 		if(S_ISREG(st.st_mode)) {
 			/* regular file, copy data */
-			if((buf = malloc(MAXBUF)) == NULL) {
-				lerrno();
-				return;
-			}
-			while((len = pread(fh, buf, (size_t)MAXBUF, offset)) > 0) {
-				archive_write_data(newarc, buf, len);
+			while((len = pread(fh, temp_io_buf, sizeof(temp_io_buf), offset)) > 0) {
+				archive_write_data(newarc, temp_io_buf, len);
 				offset += len;
 			}
-			free(buf);
 		}
 		if(len == -1) {
 			lerr("Error reading temporary file %s for file %s: %s", node->location, node->name, strerror(errno));
@@ -1087,17 +1081,12 @@ static int _ar_read_raw(const char * path, char * buf, size_t size, off_t offset
 		_ar_open_raw();
 	}
 
-	void * trash;
-	if((trash = malloc(MAXBUF)) == NULL) {
-		log("Out of memory");
-		return -ENOMEM;
-	}
 	/* skip offset */
 	offset -= rawcache.offset_uncompressed;
 
 	while(offset > 0) {
-		int skip = offset > MAXBUF ? MAXBUF : offset;
-		ret      = archive_read_data(rawcache.archive, trash, skip);
+		int skip = offset > (off_t)sizeof(temp_io_buf) ? (off_t)sizeof(temp_io_buf) : offset;
+		ret      = archive_read_data(rawcache.archive, temp_io_buf, skip);
 		if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
 			log("ar_read_raw (skipping offset): %s", archive_error_string(rawcache.archive));
 			errno = archive_errno(rawcache.archive);
@@ -1107,7 +1096,6 @@ static int _ar_read_raw(const char * path, char * buf, size_t size, off_t offset
 		rawcache.offset_uncompressed += skip;
 		offset -= skip;
 	}
-	free(trash);
 
 	if(offset) {
 		/* there was an error */
@@ -1207,15 +1195,10 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 			const char * name;
 			name = archive_entry_pathname(entry);
 			if(strcmp(realpath, name) == 0) {
-				void * trash;
-				if((trash = malloc(MAXBUF)) == NULL) {
-					log("Out of memory");
-					return -ENOMEM;
-				}
 				/* skip offset */
 				while(offset > 0) {
-					int skip = offset > MAXBUF ? MAXBUF : offset;
-					ret      = archive_read_data(archive, trash, skip);
+					int skip = offset > (off_t)sizeof(temp_io_buf) ? (off_t)sizeof(temp_io_buf) : offset;
+					ret      = archive_read_data(archive, temp_io_buf, skip);
 					if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
 						log("ar_read (skipping offset): %s", archive_error_string(archive));
 						errno = archive_errno(archive);
@@ -1224,7 +1207,6 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 					}
 					offset -= skip;
 				}
-				free(trash);
 				if(offset) {
 					/* there was an error */
 					break;
@@ -1319,20 +1301,10 @@ static off_t _ar_getsizeraw(const char * path) {
 
 	/* search for file to read */
 	while((archive_ret = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
-		const char * name;
-		name = archive_entry_pathname(entry);
+		const char * name = archive_entry_pathname(entry);
 		if(strcmp(realpath, name) == 0) {
-			void * trash;
-			if((trash = malloc(MAXBUF)) == NULL) {
-				log("Out of memory");
-				return -ENOMEM;
-			}
 			/* read until no more data */
-			ssize_t readed = MAXBUF;
-			while(readed != 0) {
-				ret    = archive_read_data(archive, trash, MAXBUF);
-				readed = ret;
-
+			while((ret = archive_read_data(archive, temp_io_buf, sizeof(temp_io_buf))) != 0) {
 				if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
 					log("ar_read (skipping offset): %s", archive_error_string(archive));
 					errno = archive_errno(archive);
@@ -1342,7 +1314,6 @@ static off_t _ar_getsizeraw(const char * path) {
 				offset += ret;
 				// log("tmp offset =%ld (%ld)",offset,offset/1024/1024);
 			}
-			free(trash);
 			break;
 		}
 		archive_read_data_skip(archive);
@@ -1703,6 +1674,54 @@ static int ar_link(const char * from, const char * to) {
 	return 0;
 }
 
+static int realise_archived_file(const char * path, char ** location, struct fuse_file_info * fi, off_t entry_size, off_t max_size) {
+	/* create new temp file */
+	char * tmpbuf   = NULL;
+	off_t tmpoffset = 0;
+	int tmp, fh;
+	if((tmp = get_temp_file_name(location)) < 0)
+		return tmp;
+	if((fh = open(*location, O_WRONLY | O_CREAT | O_EXCL, 0600)) == -1) {
+		log("error opening temp file %s: %s", *location, strerror(errno));
+		unlink(*location);
+		return -errno;
+	}
+
+	/* copy original file to temporary file */
+	if((tmpbuf = (char *)malloc(64 * 1024)) == NULL) {
+		log("Out of memory");
+		return -ENOMEM;
+	}
+
+	while(entry_size) {
+		off_t len = entry_size > 64 * 1024 ? 64 * 1024 : entry_size;
+		/* read */
+		if((tmp = _ar_read(path, tmpbuf, len, tmpoffset, fi)) < 0) {
+			log("ERROR reading while copying %s to temporary location %s: %s", path, *location, strerror(-tmp));
+		err:
+			close(fh);
+			unlink(*location);
+			free(tmpbuf);
+			return tmp;
+		}
+		/* write */
+		if(write(fh, tmpbuf, tmp) == -1) {
+			tmp = -errno;
+			log("ERROR writing while copying %s to temporary location %s: %s", path, *location, strerror(errno));
+			goto err;
+		}
+		entry_size -= len;
+		tmpoffset += len;
+		if(max_size >= 0 && tmpoffset >= max_size) {
+			/* copied enough, exit the loop */
+			break;
+		}
+	}
+	/* clean up */
+	free(tmpbuf);
+	return fh;
+}
+
 static int _ar_truncate(const char * path, off_t size) {
 	NODE * node;
 	char * location;
@@ -1735,61 +1754,12 @@ static int _ar_truncate(const char * path, off_t size) {
 			return -errno;
 		}
 	} else {
-		/* create new temp file */
-		char * tmpbuf = NULL;
-		int tmpoffset = 0;
-		int64_t tmpsize;
 		struct fuse_file_info fi;
-		if((tmp = get_temp_file_name(&location)) < 0) {
-			return tmp;
-		}
-		if((fh = open(location, O_WRONLY | O_CREAT | O_EXCL, archive_entry_mode(node->entry))) == -1) {
-			log("error opening temp file %s: %s", location, strerror(errno));
-			unlink(location);
-			return -errno;
-		}
-		/* copy original file to temporary file */
-		tmpsize = archive_entry_size(node->entry);
-		if((tmpbuf = (char *)malloc(MAXBUF)) == NULL) {
-			log("Out of memory");
-			return -ENOMEM;
-		}
-		while(tmpsize) {
-			int len = tmpsize > MAXBUF ? MAXBUF : tmpsize;
-			/* read */
-			if((tmp = _ar_read(path, tmpbuf, len, tmpoffset, &fi)) < 0) {
-				log("ERROR reading while copying %s to "
-				    "temporary location %s: %s",
-				    path, location, strerror(0 - tmp));
-				close(fh);
-				unlink(location);
-				free(tmpbuf);
-				return tmp;
-			}
-			/* write */
-			if(write(fh, tmpbuf, tmp) == -1) {
-				tmp = -errno;
-				log("ERROR writing while copying %s to "
-				    "temporary location %s: %s",
-				    path, location, strerror(errno));
-				close(fh);
-				unlink(location);
-				free(tmpbuf);
-				return tmp;
-			}
-			tmpsize -= len;
-			tmpoffset += len;
-			if(tmpoffset >= size) {
-				/* copied enough, exit the loop */
-				break;
-			}
-		}
-		/* clean up */
-		free(tmpbuf);
-		lseek(fh, 0, SEEK_SET);
+		if((fh = realise_archived_file(path, &location, &fi, archive_entry_size(node->entry), size)) < 0)
+			return fh;
 	}
 	/* truncate temporary file */
-	if((ret = truncate(location, size)) == -1) {
+	if((ret = ftruncate(fh, size)) == -1) {
 		tmp = -errno;
 		log("ERROR truncating %s (temporary location %s): %s", path, location, strerror(errno));
 		close(fh);
@@ -1800,7 +1770,7 @@ static int _ar_truncate(const char * path, off_t size) {
 	node->location = location;
 	node->modified = true;
 	if((tmp = update_entry_stat(node)) < 0) {
-		log("write: error stat'ing file %s: %s", node->location, strerror(0 - tmp));
+		log("write: error stat'ing file %s: %s", node->location, strerror(-tmp));
 		close(fh);
 		unlink(location);
 		return tmp;
@@ -1856,60 +1826,13 @@ static int _ar_write(const char * path, const char * buf, size_t size, off_t off
 			return -errno;
 		}
 	} else {
-		/* create new temp file */
-		char * tmpbuf = NULL;
-		int tmpoffset = 0;
-		int64_t tmpsize;
-		if((tmp = get_temp_file_name(&location)) < 0) {
-			return tmp;
-		}
-		if((fh = open(location, O_WRONLY | O_CREAT | O_EXCL, archive_entry_mode(node->entry))) == -1) {
-			log("error opening temp file %s: %s", location, strerror(errno));
-			unlink(location);
-			return -errno;
-		}
-		/* copy original file to temporary file */
-		tmpsize = archive_entry_size(node->entry);
-		if((tmpbuf = (char *)malloc(MAXBUF)) == NULL) {
-			log("Out of memory");
-			return -ENOMEM;
-		}
-		while(tmpsize) {
-			int len = tmpsize > MAXBUF ? MAXBUF : tmpsize;
-			/* read */
-			if((tmp = _ar_read(path, tmpbuf, len, tmpoffset, fi)) < 0) {
-				log("ERROR reading while copying %s to "
-				    "temporary location %s: %s",
-				    path, location, strerror(0 - tmp));
-				close(fh);
-				unlink(location);
-				free(tmpbuf);
-				return tmp;
-			}
-			/* write */
-			if(write(fh, tmpbuf, len) == -1) {
-				tmp = -errno;
-				log("ERROR writing while copying %s to "
-				    "temporary location %s: %s",
-				    path, location, strerror(errno));
-				close(fh);
-				unlink(location);
-				free(tmpbuf);
-				return tmp;
-			}
-			tmpsize -= len;
-			tmpoffset += len;
-		}
-		/* clean up */
-		free(tmpbuf);
-		lseek(fh, 0, SEEK_SET);
+		if((fh = realise_archived_file(path, &location, fi, archive_entry_size(node->entry), -1)) < 0)
+			return fh;
 	}
 	/* write changes to temporary file */
 	if((ret = pwrite(fh, buf, size, offset)) == -1) {
 		tmp = -errno;
-		log("ERROR writing changes to %s (temporary "
-		    "location %s): %s",
-		    path, location, strerror(errno));
+		log("ERROR writing changes to %s (temporary location %s): %s", path, location, strerror(errno));
 		close(fh);
 		unlink(location);
 		return tmp;
@@ -1918,7 +1841,7 @@ static int _ar_write(const char * path, const char * buf, size_t size, off_t off
 	node->location = location;
 	node->modified = true;
 	if((tmp = update_entry_stat(node)) < 0) {
-		log("write: error stat'ing file %s: %s", node->location, strerror(0 - tmp));
+		log("write: error stat'ing file %s: %s", node->location, strerror(-tmp));
 		close(fh);
 		unlink(location);
 		return tmp;
