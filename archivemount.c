@@ -134,7 +134,7 @@ static int archiveFd; /* file descriptor of archive file, just to keep the
 static int archiveModified  = 0;
 static int archiveWriteable = 0;
 static NODE * root;
-static FORMATRAW_CACHE * rawcache;
+static FORMATRAW_CACHE rawcache;
 struct options options;
 char * mtpt                 = NULL;
 char * archiveFile          = NULL;
@@ -243,21 +243,6 @@ static NODE * init_node() {
 	}
 
 	return node;
-}
-
-static FORMATRAW_CACHE * init_rawcache() {
-	FORMATRAW_CACHE * rawcache;
-
-	if((rawcache = malloc(sizeof(FORMATRAW_CACHE))) == NULL) {
-		log("Out of memory");
-		return NULL;
-	}
-
-	memset(&rawcache->st, 0, sizeof(rawcache->st));
-	memset(&rawcache->archive, 0, sizeof(rawcache->archive));
-	rawcache->opened              = 0;
-	rawcache->offset_uncompressed = 0;
-	return rawcache;
 }
 
 static void free_node(NODE * node) {
@@ -1045,7 +1030,7 @@ static int _ar_open_raw(void)
 	log("_ar_open_raw called, path: '%s'", path);
 
 
-	if(rawcache->opened != 0) {
+	if(rawcache.opened != 0) {
 		log("already opened");
 		return 0;
 	}
@@ -1065,43 +1050,43 @@ static int _ar_open_raw(void)
 	int archive_ret;
 	/* search file in archive */
 	realpath = archive_entry_pathname(node->entry);
-	if((rawcache->archive = archive_read_new()) == NULL) {
+	if((rawcache.archive = archive_read_new()) == NULL) {
 		log("Out of memory");
 		return -ENOMEM;
 	}
-	archive_ret = archive_read_support_filter_all(rawcache->archive);
+	archive_ret = archive_read_support_filter_all(rawcache.archive);
 	if(archive_ret != ARCHIVE_OK) {
-		log("archive_read_support_filter_all(): %s (%d)\n", archive_error_string(rawcache->archive), archive_ret);
+		log("archive_read_support_filter_all(): %s (%d)\n", archive_error_string(rawcache.archive), archive_ret);
 		return -EIO;
 	}
 
-	archive_ret = archive_read_support_format_raw(rawcache->archive);
+	archive_ret = archive_read_support_format_raw(rawcache.archive);
 	if(archive_ret != ARCHIVE_OK) {
-		log("archive_read_support_format_raw(): %s (%d)\n", archive_error_string(rawcache->archive), archive_ret);
+		log("archive_read_support_format_raw(): %s (%d)\n", archive_error_string(rawcache.archive), archive_ret);
 		return -EIO;
 	}
 	if(options.password) {
-		if(archive_read_add_passphrase(rawcache->archive, user_passphrase) != ARCHIVE_OK) {
-			fprintf(stderr, "%s\n", archive_error_string(rawcache->archive));
-			return archive_errno(rawcache->archive);
+		if(archive_read_add_passphrase(rawcache.archive, user_passphrase) != ARCHIVE_OK) {
+			fprintf(stderr, "%s\n", archive_error_string(rawcache.archive));
+			return archive_errno(rawcache.archive);
 		}
 	}
 
-	archive_ret = archive_read_open_fd(rawcache->archive, archiveFd, BLOCK_SIZE);
+	archive_ret = archive_read_open_fd(rawcache.archive, archiveFd, BLOCK_SIZE);
 	if(archive_ret != ARCHIVE_OK) {
-		log("archive_read_open_fd(): %s (%d)\n", archive_error_string(rawcache->archive), archive_ret);
+		log("archive_read_open_fd(): %s (%d)\n", archive_error_string(rawcache.archive), archive_ret);
 		return -EIO;
 	}
 	/* search for file to read - "/data" must be the first entry */
-	while((archive_ret = archive_read_next_header(rawcache->archive, &entry)) == ARCHIVE_OK) {
+	while((archive_ret = archive_read_next_header(rawcache.archive, &entry)) == ARCHIVE_OK) {
 		const char * name;
 		name = archive_entry_pathname(entry);
 		if(strcmp(realpath, name) == 0) {
 			break;
 		}
 	}
-	rawcache->opened              = 1;
-	rawcache->offset_uncompressed = 0;
+	rawcache.opened              = 1;
+	rawcache.offset_uncompressed = 0;
 
 	return ret;
 }
@@ -1118,14 +1103,14 @@ static int _ar_read_raw(const char * path, char * buf, size_t size, off_t offset
 		return -ENOENT;
 	}
 
-	if(offset < rawcache->offset_uncompressed) {
+	if(offset < rawcache.offset_uncompressed) {
 		// rewind archive
 
 		/* close archive */
-		archive_read_free(rawcache->archive);
+		archive_read_free(rawcache.archive);
 		lseek(archiveFd, 0, SEEK_SET);
 
-		rawcache->opened = 0;
+		rawcache.opened = 0;
 
 		/* reopen */
 		_ar_open_raw();
@@ -1137,18 +1122,18 @@ static int _ar_read_raw(const char * path, char * buf, size_t size, off_t offset
 		return -ENOMEM;
 	}
 	/* skip offset */
-	offset -= rawcache->offset_uncompressed;
+	offset -= rawcache.offset_uncompressed;
 
 	while(offset > 0) {
 		int skip = offset > MAXBUF ? MAXBUF : offset;
-		ret      = archive_read_data(rawcache->archive, trash, skip);
+		ret      = archive_read_data(rawcache.archive, trash, skip);
 		if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
-			log("ar_read_raw (skipping offset): %s", archive_error_string(rawcache->archive));
-			errno = archive_errno(rawcache->archive);
+			log("ar_read_raw (skipping offset): %s", archive_error_string(rawcache.archive));
+			errno = archive_errno(rawcache.archive);
 			ret   = -1;
 			break;
 		}
-		rawcache->offset_uncompressed += skip;
+		rawcache.offset_uncompressed += skip;
 		offset -= skip;
 	}
 	free(trash);
@@ -1159,13 +1144,13 @@ static int _ar_read_raw(const char * path, char * buf, size_t size, off_t offset
 		return -EIO;
 	}
 	/* read data */
-	ret = archive_read_data(rawcache->archive, buf, size);
+	ret = archive_read_data(rawcache.archive, buf, size);
 	if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
-		log("ar_read_raw (reading data): %s", archive_error_string(rawcache->archive));
-		errno = archive_errno(rawcache->archive);
+		log("ar_read_raw (reading data): %s", archive_error_string(rawcache.archive));
+		errno = archive_errno(rawcache.archive);
 		ret   = -1;
 	}
-	rawcache->offset_uncompressed += size;
+	rawcache.offset_uncompressed += size;
 	return ret;
 }
 
@@ -1415,7 +1400,7 @@ static int _ar_getattr(const char * path, struct stat * stbuf) {
 	}
 	if(options.formatraw && !node->children) {
 		fstat(archiveFd, stbuf);
-		size = rawcache->st.st_size;
+		size = rawcache.st.st_size;
 		if(size < 0)
 			return -1;
 		stbuf->st_size = size;
@@ -2597,11 +2582,9 @@ int main(int argc, char ** argv) {
 
 	if(options.formatraw) {
 		/* create rawcache */
-		if((rawcache = init_rawcache()) == NULL)
-			return -ENOMEM;
 		fprintf(stderr, "Calculating uncompressed file size. Please wait.\n");
-		rawcache->st.st_size = _ar_getsizeraw("/data");
-		// log("cache st_size = %ld",rawcache->st.st_size);
+		rawcache.st.st_size = _ar_getsizeraw("/data");
+		// log("cache st_size = %ld",rawcache.st.st_size);
 	}
 
 	/* save directory this was started from */
