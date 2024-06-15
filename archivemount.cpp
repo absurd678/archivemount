@@ -140,8 +140,8 @@ static bool archiveWriteable = false;
 static NODE * root;
 static FORMATRAW_CACHE rawcache;
 static struct options options;
-static char * mtpt                 = NULL;
-static char * archiveFile          = NULL;
+static const char * mtpt           = NULL;
+static const char * archiveFile    = NULL;
 static char * user_passphrase      = NULL;
 static size_t user_passphrase_size = 0;
 static pthread_mutex_t lock; /* global node tree lock */
@@ -197,10 +197,10 @@ static int ar_opt_proc(void * data, const char * arg, int key, struct fuse_args 
 
 		case FUSE_OPT_KEY_NONOPT:
 			if(!archiveFile) {
-				archiveFile = strdup(arg);
+				archiveFile = arg;
 				return 0;
 			} else if(!mtpt) {
-				mtpt = strdup(arg);
+				mtpt = arg;
 			}
 			return 1;
 
