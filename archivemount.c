@@ -2494,53 +2494,17 @@ void showUsage() {
 	fprintf(stderr, "Usage:	      (-v|--version)\n");
 }
 
-void setEcho(int echo) {
-	struct termios t;
-	tcgetattr(STDIN_FILENO, &t);
-	t.c_lflag = (t.c_lflag & ~ECHO) | (echo ? ECHO : 0);
+static struct termios noEcho() {
+	struct termios orig, t;
+	tcgetattr(STDIN_FILENO, &orig);
+	t = orig;
+	t.c_lflag &= ~ECHO;
 	tcsetattr(STDIN_FILENO, TCSANOW, &t);
-}
-
-/* This is basically getline(3), re-implemented to avoid requiring
- * _POSIX_C_SOURCE >= 200809L. */
-ssize_t getLine(char ** lineptr, size_t * n, FILE * stream) {
-	int can_realloc = 0;
-	ssize_t count   = 0;
-	if(*lineptr == NULL && *n == 0) {
-		can_realloc = 1;
-		*n          = 16;
-		*lineptr    = malloc(*n);
-		if(*lineptr == NULL)
-			return -1;
-	}
-	for(;;) {
-		if(count >= *n - 1) {
-			if(can_realloc) {
-				*n *= 2;
-				lineptr = realloc(lineptr, *n);
-				if(*lineptr == NULL)
-					return -1;
-			} else {
-				(*lineptr)[*n] = '\0';
-				return *n;
-			}
-		}
-		int c = fgetc(stream);
-		switch(c) {
-			default:
-				(*lineptr)[count++] = c;
-				break;
-			case '\n':
-				(*lineptr)[count++] = c; /* fall through */
-			case EOF:
-				(*lineptr)[count] = '\0';
-				return (c == '\n' || feof(stream)) ? count : -1;
-		}
-	}
+	return orig;
 }
 
 ssize_t getPassphrase(char ** lineptr, size_t * n, FILE * stream) {
-	ssize_t ret = getLine(lineptr, n, stream);
+	ssize_t ret = getline(lineptr, n, stream);
 	/* Strip newline off the end */
 	if(ret > 0 && (*lineptr)[ret - 1] == '\n') {
 		(*lineptr)[--ret] = '\0';
@@ -2579,11 +2543,11 @@ int main(int argc, char ** argv) {
 	}
 
 	if(options.password) {
-		setEcho(0);
+		struct termios orig = noEcho();
 		fputs("Enter passphrase:", stderr);
 		getPassphrase(&user_passphrase, &user_passphrase_size, stdin);
 		fputs("\n", stderr);
-		setEcho(1);
+		tcsetattr(STDIN_FILENO, TCSANOW, &orig);
 	}
 
 	if(!options.readonly) {
