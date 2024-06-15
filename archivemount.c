@@ -769,19 +769,17 @@ rename_recursively(NODE *start, const char *from, const char *to)
 }
 
 static int
-get_temp_file_name(const char *path, char **location)
+get_temp_file_name(char **location)
 {
+	static const char *tmpdir;;
+	if (!tmpdir)
+		 tmpdir = getenv("TMPDIR") ?: P_tmpdir;
+
 	int fh;
 
 	/* create name for temp file */
-	if ((*location = (char *)malloc(
-				strlen(P_tmpdir) +
-				strlen("/archivemount_XXXXXX") +
-				1)) == NULL) {
-		log("Out of memory");
-		return -ENOMEM;
-	}
-	sprintf(*location, "%s/archivemount_XXXXXX", P_tmpdir);
+	if(asprintf(location, "%s/archivemount_XXXXXX", tmpdir) == -1)
+		return -errno;
 	if ((fh = mkstemp(*location))  == -1) {
 		log("Could not create temp file name %s: %s",
 			*location, strerror(errno));
@@ -1630,7 +1628,7 @@ ar_mkdir(const char *path, mode_t mode)
 		return -EEXIST;
 	}
 	/* create name for temp dir */
-	if ((tmp = get_temp_file_name(path, &location)) < 0) {
+	if ((tmp = get_temp_file_name(&location)) < 0) {
 		pthread_mutex_unlock(&lock);
 		return tmp;
 	}
@@ -1971,7 +1969,7 @@ _ar_truncate(const char *path, off_t size)
 		int tmpoffset = 0;
 		int64_t tmpsize;
 		struct fuse_file_info fi;
-		if ((tmp = get_temp_file_name(path, &location)) < 0) {
+		if ((tmp = get_temp_file_name(&location)) < 0) {
 			return tmp;
 		}
 		if ((fh = open(location, O_WRONLY | O_CREAT | O_EXCL,
@@ -2109,7 +2107,7 @@ _ar_write(const char *path, const char *buf, size_t size,
 		char *tmpbuf = NULL;
 		int tmpoffset = 0;
 		int64_t tmpsize;
-		if ((tmp = get_temp_file_name(path, &location)) < 0) {
+		if ((tmp = get_temp_file_name(&location)) < 0) {
 			return tmp;
 		}
 		if ((fh = open(location, O_WRONLY | O_CREAT | O_EXCL,
@@ -2217,7 +2215,7 @@ ar_mknod(const char *path, mode_t mode, dev_t rdev)
 		return -EEXIST;
 	}
 	/* create name for temp file */
-	if ((tmp = get_temp_file_name(path, &location)) < 0) {
+	if ((tmp = get_temp_file_name(&location)) < 0) {
 		pthread_mutex_unlock(&lock);
 		return tmp;
 	}
@@ -2678,7 +2676,7 @@ ar_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 		return -EEXIST;
 	}
 	/* create name for temp file */
-	if ((tmp = get_temp_file_name(path, &location)) < 0) {
+	if ((tmp = get_temp_file_name(&location)) < 0) {
 		pthread_mutex_unlock(&lock);
 		return tmp;
 	}
