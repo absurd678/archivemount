@@ -331,14 +331,9 @@ static int insert_by_path(NODE * root, NODE * node) {
 			if((tempnode = init_node()) == NULL)
 				return -ENOMEM;
 
-			if((tempnode->name = malloc(strlen(last->name) + namlen + 2)) == NULL) {
+			if(asprintf(&tempnode->name, "%s/%s", last != root ? last->name : "", nam) == -1) {
 				log("Out of memory");
 				return -ENOMEM;
-			}
-			if(last != root) {
-				sprintf(tempnode->name, "%s/%s", last->name, nam);
-			} else {
-				sprintf(tempnode->name, "/%s", nam);
 			}
 			tempnode->basename = strrchr(tempnode->name, '/') + 1;
 
@@ -506,11 +501,11 @@ static int build_tree(const char * mtpt) {
 			cur->name = strdup(name + 1);
 		} else if(name[0] != '/') {
 			/* prepend a '/' to name */
-			if((cur->name = malloc(strlen(name) + 2)) == NULL) {
+			if(asprintf(&cur->name, "/%s", name) == -1) {
 				log("Out of memory");
 				return -ENOMEM;
 			}
-			sprintf(cur->name, "/%s", name);
+			;
 		} else {
 			/* just set the name */
 			cur->name = strdup(name);
@@ -683,8 +678,7 @@ static int rename_recursively(NODE * start, const char * from, const char * to) 
 		node = node->hh.next;
 	}
 
-	size_t i;
-	for(i = 0; i < count; ++i) {
+	for(size_t i = 0; i < count; ++i) {
 		node = nodes[i];
 		if(node->child) {
 			/* recurse */
@@ -693,18 +687,9 @@ static int rename_recursively(NODE * start, const char * from, const char * to) 
 		remove_child(node);
 		/* change node name */
 		individualName = node->name + strlen(from);
-		if(*to != '/') {
-			if((newName = (char *)malloc(strlen(to) + strlen(individualName) + 2)) == NULL) {
-				log("Out of memory");
-				return -ENOMEM;
-			}
-			sprintf(newName, "/%s%s", to, individualName);
-		} else {
-			if((newName = (char *)malloc(strlen(to) + strlen(individualName) + 1)) == NULL) {
-				log("Out of memory");
-				return -ENOMEM;
-			}
-			sprintf(newName, "%s%s", to, individualName);
+		if(asprintf(&newName, "%s%s%s", *to != '/' ? "/" : "", to, individualName) == -1){
+			log("Out of memory");
+			return -ENOMEM;
 		}
 		log("new name: '%s'", newName);
 		correct_hardlinks_to_node(root, node->name, newName);
@@ -719,7 +704,6 @@ static int rename_recursively(NODE * start, const char * from, const char * to) 
 
 static int get_temp_file_name(char ** location) {
 	static const char * tmpdir;
-	;
 	if(!tmpdir)
 		tmpdir = getenv("TMPDIR") ?: P_tmpdir;
 
@@ -841,15 +825,13 @@ static int save(const char * archiveFile) {
 	char * oldfilename;
 	NODE * node;
 
-	oldfilename = malloc(strlen(archiveFile) + 5 + 1);
-	if(!oldfilename) {
-		log("Could not allocate memory for oldfilename");
-		return 0 - ENOMEM;
-	}
 	/* unfortunately libarchive does not support modification of
 	 * compressed archives, so a new archive has to be written */
 	/* rename old archive */
-	sprintf(oldfilename, "%s.orig", archiveFile);
+	if(asprintf(&oldfilename, "%s.orig", archiveFile) == -1) {
+		log("Could not allocate memory for oldfilename");
+		return -ENOMEM;
+	}
 	close(archiveFd);
 	if(rename(archiveFile, oldfilename) < 0) {
 		int err        = errno;
@@ -2238,12 +2220,11 @@ static int ar_rename(const char * from, const char * to) {
 	/* meta data is changed in save() */
 	/* change from_node name */
 	if(*to != '/') {
-		if((temp_name = malloc(strlen(to) + 2)) == NULL) {
+		if(asprintf(&temp_name, "/%s", to) == -1) {
 			log("Out of memory");
 			pthread_mutex_unlock(&lock);
 			return -ENOMEM;
 		}
-		sprintf(temp_name, "/%s", to);
 	} else {
 		if((temp_name = strdup(to)) == NULL) {
 			log("Out of memory");
