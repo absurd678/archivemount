@@ -38,6 +38,8 @@
 #include <pthread.h>
 #include <pwd.h>
 #include <regex.h>
+#include <search.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,8 +52,6 @@
 #include <unistd.h>
 #include <utime.h>
 #include <wchar.h>
-#include <search.h>
-#include <setjmp.h>
 
 /**********/
 /* macros */
@@ -68,7 +68,7 @@
 /*******************/
 
 typedef struct node {
-	char * basename;              /* every after the last '/' */
+	char * basename; /* every after the last '/' */
 	// ^ must be first
 	struct node * parent;
 	void * children;              /* tsearch(3) tree */
@@ -83,7 +83,7 @@ struct falsenode {
 	// ^ must be first
 };
 
-static int compar(const void *l, const void *r) {
+static int compar(const void * l, const void * r) {
 	return strcmp(((NODE *)l)->basename, ((NODE *)r)->basename);
 }
 
@@ -248,7 +248,7 @@ static NODE * init_node() {
 static void free_node(NODE * node) {
 	free(node->name);
 	archive_entry_free(node->entry);
-	tdestroy(node->children, (void(*)(void *))free_node);
+	tdestroy(node->children, (void (*)(void *))free_node);
 	free(node);
 }
 
@@ -285,9 +285,9 @@ static int insert_by_path(NODE * root, NODE * node) {
 		NODE * last = cur;
 
 		strncpy(nam, key, namlen);
-		nam[namlen] = '\0';
+		nam[namlen]   = '\0';
 		NODE ** found = tfind(&(struct falsenode){.basename = nam}, &cur->children, compar);
-		if (found) {
+		if(found) {
 			cur = *found;
 		} else {
 			/* parent path not found, create a temporary one */
@@ -466,8 +466,7 @@ static int build_tree(const char * mtpt) {
 			if(asprintf(&cur->name, "/%s", name) == -1) {
 				log("Out of memory");
 				return -ENOMEM;
-			}
-			;
+			};
 		} else {
 			/* just set the name */
 			cur->name = strdup(name);
@@ -511,10 +510,10 @@ static int build_tree(const char * mtpt) {
 static NODE * find_modified_node_found_data;
 static jmp_buf find_modified_node_found_jmp;
 static void find_modified_node_find(const void * nodep, VISIT which, int depth) {
-	(void) depth;
+	(void)depth;
 	if(which != leaf && which != preorder)
 		return;
-	NODE * node = *(NODE *const *)nodep;
+	NODE * node = *(NODE * const *)nodep;
 
 	if(node->modified) {
 		find_modified_node_found_data = node;
@@ -522,7 +521,7 @@ static void find_modified_node_find(const void * nodep, VISIT which, int depth) 
 	}
 
 	if(node->children)
-	  twalk(node->children, find_modified_node_find);
+		twalk(node->children, find_modified_node_find);
 }
 static NODE * find_modified_node(NODE * start) {
 	if(start->modified)
@@ -531,7 +530,7 @@ static NODE * find_modified_node(NODE * start) {
 	if(start->children) {
 		if(setjmp(find_modified_node_found_jmp))
 			return find_modified_node_found_data;
-	  twalk(start->children, find_modified_node_find);
+		twalk(start->children, find_modified_node_find);
 	}
 	return NULL;
 }
@@ -539,10 +538,10 @@ static NODE * find_modified_node(NODE * start) {
 static const char * correct_hardlinks_to_node_old_name;
 static const char * correct_hardlinks_to_node_new_name;
 static void correct_hardlinks_to_node_find(const void * nodep, VISIT which, int depth) {
-	(void) depth;
+	(void)depth;
 	if(which != leaf && which != preorder)
 		return;
-	NODE * run = *(NODE *const *)nodep;
+	NODE * run = *(NODE * const *)nodep;
 
 	const char * tmp = archive_entry_hardlink(run->entry);
 	if(tmp && strcmp(tmp, correct_hardlinks_to_node_old_name) == 0) {
@@ -559,7 +558,7 @@ static void correct_hardlinks_to_node(const char * old_name, const char * new_na
 	twalk(root->children, correct_hardlinks_to_node_find);
 }
 
-static int compar_first(const void *l, const void *r) {
+static int compar_first(const void * l, const void * r) {
 	(void)l, (void)r;
 	return 0;
 }
@@ -597,17 +596,17 @@ static NODE * get_node_for_path(NODE * start, const char * path) {
 		if(*basename == '/')
 			basename++;
 
-		baseend = strchrnul(basename, '/');
+		baseend   = strchrnul(basename, '/');
 		char last = *baseend;
 
 		// log("get_node_for_path path: '%s' start: '%s' basename: '%s' len: %ld", path, start->name, basename, baseend - basename);
 
 		// NB: not thread-safe
 		if(last)
-			*(char*)baseend = '\0';
+			*(char *)baseend = '\0';
 		NODE ** found = tfind(&(struct falsenode){.basename = basename}, &start->children, compar);
 		if(last)
-			*(char*)baseend = last;
+			*(char *)baseend = last;
 		if(found)
 			return get_node_for_path(*found, path);
 	}
@@ -620,10 +619,10 @@ static NODE * get_node_for_entry_found_data;
 static const char * get_node_for_entry_found_path;
 static jmp_buf get_node_for_entry_found_jmp;
 static void get_node_for_entry_find(const void * nodep, VISIT which, int depth) {
-	(void) depth;
+	(void)depth;
 	if(which != leaf && which != preorder)
 		return;
-	NODE * run = *(NODE *const *)nodep;
+	NODE * run = *(NODE * const *)nodep;
 
 	const char * name = archive_entry_pathname(run->entry);
 	if(*name == '/')
@@ -650,8 +649,8 @@ static NODE * get_node_for_entry(NODE * under, struct archive_entry * entry) {
 
 static size_t rename_recursively_count_count;
 static void rename_recursively_count_find(const void * nodep, VISIT which, int depth) {
-	(void) nodep;
-	(void) depth;
+	(void)nodep;
+	(void)depth;
 	if(which != leaf && which != preorder)
 		return;
 
@@ -659,10 +658,10 @@ static void rename_recursively_count_find(const void * nodep, VISIT which, int d
 }
 static NODE ** rename_recursively_accumulate_list;
 static void rename_recursively_accumulate_find(const void * nodep, VISIT which, int depth) {
-	(void) depth;
+	(void)depth;
 	if(which != leaf && which != preorder)
 		return;
-	NODE * node = *(NODE *const *)nodep;
+	NODE * node = *(NODE * const *)nodep;
 
 	*rename_recursively_accumulate_list++ = node;
 }
@@ -674,13 +673,13 @@ static int rename_recursively(NODE * under, const char * from, const char * to) 
 	   the hashtable is a bad idea, so we copy all node ptrs
 	   into an array first and iterate over that instead */
 	rename_recursively_count_count = 0;
-  twalk(under->children, rename_recursively_count_find);
+	twalk(under->children, rename_recursively_count_find);
 	size_t count = rename_recursively_count_count;
 
 	NODE * nodes[count];
 	rename_recursively_accumulate_list = nodes;
 	log("%s has %zu items", under->name, count);
-  twalk(under->children, rename_recursively_accumulate_find);
+	twalk(under->children, rename_recursively_accumulate_find);
 
 	for(size_t i = 0; i < count; ++i) {
 		NODE * node = nodes[i];
@@ -690,7 +689,7 @@ static int rename_recursively(NODE * under, const char * from, const char * to) 
 		remove_child(node);
 		/* change node name */
 		individualName = node->name + strlen(from);
-		if(asprintf(&newName, "%s%s%s", *to != '/' ? "/" : "", to, individualName) == -1){
+		if(asprintf(&newName, "%s%s%s", *to != '/' ? "/" : "", to, individualName) == -1) {
 			log("Out of memory");
 			return -ENOMEM;
 		}
@@ -2330,10 +2329,10 @@ static void * ar_readdir_find_buf;
 static fuse_fill_dir_t ar_readdir_find_filler;
 static jmp_buf ar_readdir_find_jmp;
 static void ar_readdir_find(const void * nodep, VISIT which, int depth) {
-	(void) depth;
+	(void)depth;
 	if(which != leaf && which != preorder)
 		return;
-	NODE * node = *(NODE *const *)nodep;
+	NODE * node = *(NODE * const *)nodep;
 
 	const struct stat * st;
 	if(archive_entry_hardlink(node->entry)) {
@@ -2349,8 +2348,8 @@ static void ar_readdir_find(const void * nodep, VISIT which, int depth) {
 	/* Make a copy so we can set blocks/blksize. These are not
 	 * set by libarchive. https://github.com/libarchive/libarchive/issues/302 */
 	struct stat st_copy = *st;
-	st_copy.st_blocks  = (st_copy.st_size + 511) / 512;
-	st_copy.st_blksize = 4096;
+	st_copy.st_blocks   = (st_copy.st_size + 511) / 512;
+	st_copy.st_blksize  = 4096;
 
 	if(ar_readdir_find_filler(ar_readdir_find_buf, node->basename, &st_copy, 0))
 		longjmp(ar_readdir_find_jmp, ENOMEM);
@@ -2376,14 +2375,14 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 	filler(buf, ".", NULL, 0);
 	filler(buf, "..", NULL, 0);
 
-	ar_readdir_find_buf = buf;
+	ar_readdir_find_buf    = buf;
 	ar_readdir_find_filler = filler;
 	int errnum;
 	if((errnum = setjmp(ar_readdir_find_jmp))) {
 		pthread_mutex_unlock(&lock);
 		return -errnum;
 	}
-  twalk(node->children, ar_readdir_find);
+	twalk(node->children, ar_readdir_find);
 
 	pthread_mutex_unlock(&lock);
 	return 0;
