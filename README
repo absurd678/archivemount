@@ -23,7 +23,7 @@ Debian bugs:
   [0.8.4] #651442:  does not handle compressed (single) files
   [     ] #857985:  appears a kernel upgrade changed the ABI unexpectedly
   [lllll] #674231:  Add 7zip support
-  [1-1  ] #1073228: uthash is BSD-1-Clause, not BSD-2-Clause
+  [  1  ] #1073228: uthash is BSD-1-Clause, not BSD-2-Clause
 
 Upstream (https://github.com/cybernoid/archivemount) bugs:
   [0.8.9] #28: Chokes on CSRG ISO

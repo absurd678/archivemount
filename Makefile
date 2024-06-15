@@ -23,7 +23,7 @@ LDLIBS   += $(shell for p in fuse libarchive; do $(PKG_CONFIG) --libs $$p || ech
 
 all: archivemount archivemount.1
 clean:
-	rm -rf *.o archivemount archivemount.1
+	rm -rf archivemount archivemount.1
 
 
 install: all
@@ -33,6 +33,3 @@ install: all
 
 archivemount.1: archivemount.1.in
 	awk '{ gsub(/ \^/, " \\(ha"); gsub(/ ~/, " \\(ti"); if($$1 == ".Dd") $$2 = "$(MANUAL_DATE)"; if($$1 == ".Dt") print ".ds doc-volume-operating-system"; if($$1 == ".Os") $$2 = "archivemount-ng $(VERSION)"; print}' < $< > $@
-
-archivemount:   archivemount.o
-archivemount.o: archivemount.c uthash.h
