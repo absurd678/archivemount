@@ -352,13 +352,10 @@ static int build_tree(const char * mtpt) {
 #define PREFIX "^\\.\\?"
 
 	if(options.subtree_filter) {
-		subtree_filter = malloc(strlen(options.subtree_filter) + strlen(PREFIX) + 1);
-		if(!subtree_filter) {
+		if(asprintf(&subtree_filter, PREFIX "%s", options.subtree_filter) == -1) {
 			log("Not enough memory");
 			return -ENOMEM;
 		}
-		strcpy(subtree_filter, PREFIX);
-		subtree_filter = strcat(subtree_filter, options.subtree_filter);
 		/* \? is only a special char on Mac if REG_ENHANCED is specified  */
 #if defined REG_ENHANCED
 		regex_error = regcomp(&subtree, subtree_filter, REG_ENHANCED);
