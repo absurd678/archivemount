@@ -59,10 +59,8 @@ Write version of
 and its dependencies to standard output and error streams (intermingled), then exit.
 .Pp
 .
-.It Fl o Cm readonly
+.It Fl o Cm readonly , Fl o Cm ro , Fl r
 Disable writes entirely.
-Logically equivalent to
-.Fl r .
 .
 .It Fl o Cm password
 Prompt for archive passphrase.

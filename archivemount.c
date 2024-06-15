@@ -112,6 +112,7 @@ enum {
 #define AR_OPT(t, p, v) {t, offsetof(struct options, p), v}
 
 static const struct fuse_opt ar_opts[] = {AR_OPT("readonly", readonly, 1),
+                                          AR_OPT("-r", readonly, 1),
                                           AR_OPT("password", password, 1),
                                           AR_OPT("nobackup", nobackup, 1),
                                           AR_OPT("nosave", nosave, 1),
@@ -162,13 +163,13 @@ static void usage(const char * progname) {
 	        "\n"
 	        "general options:\n"
 	        "    -o opt,[opt...]	    mount options\n"
-	        "    -h   --help	    print help\n"
+	        "    -h   --help		    print help\n"
 	        "    -V   --version	    print version\n"
 	        "\n"
 	        "archivemount options:\n"
-	        "    -o readonly	    disable write support\n"
-	        "    -o password	    prompt for a password.\n"
-	        "    -o nobackup	    remove archive file backups\n"
+	        "    -o readonly, -o ro, -r  disable write support\n"
+	        "    -o password		    prompt for a password.\n"
+	        "    -o nobackup		    remove archive file backups\n"
 	        "    -o nosave		    do not save changes upon unmount.\n"
 	        "			    Good if you want to change something\n"
 	        "			    and save it as a diff,\n"
@@ -2522,7 +2523,6 @@ int main(int argc, char ** argv) {
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
 	/* parse cmdline args */
-	memset(&options, 0, sizeof(struct options));
 	if(fuse_opt_parse(&args, &options, ar_opts, ar_opt_proc) == -1)
 		return -1;
 	if(archiveFile == NULL) {
@@ -2554,7 +2554,9 @@ int main(int argc, char ** argv) {
 		tcsetattr(STDIN_FILENO, TCSANOW, &orig);
 	}
 
-	if(!options.readonly) {
+	if(options.readonly) {
+		fuse_opt_add_arg(&args, "-r");
+	} else {
 		/* check if archive is writeable */
 		archiveFd = open(archiveFile, O_RDWR);
 		if(archiveFd != -1) {
@@ -2610,10 +2612,11 @@ int main(int argc, char ** argv) {
 
 		res = fuse_parse_cmdline(&args, &mountpoint, &multithreaded,
 #ifdef FUSE_NUMA
-		                         &foreground, &numa);
+		                         &foreground, &numa
 #else
-		                         &foreground);
+		                         &foreground
 #endif
+		                         );
 		if(res == -1)
 			exit(1);
 
