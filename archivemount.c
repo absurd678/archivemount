@@ -51,8 +51,6 @@
 #include <utime.h>
 #include <wchar.h>
 
-#include "archivecomp.h"
-
 #include "uthash.h"
 
 /**********/
