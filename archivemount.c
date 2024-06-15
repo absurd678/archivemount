@@ -2489,11 +2489,6 @@ static struct fuse_operations ar_oper = {
     //.bmap		  = ar_bmap,	   // int(*bmap)(const char *, size_t blocksize, uint64_t *idx)
 };
 
-void showUsage() {
-	fprintf(stderr, "Usage: archivemount <fuse-options> <archive> <mountpoint>\n");
-	fprintf(stderr, "Usage:	      (-v|--version)\n");
-}
-
 static struct termios noEcho() {
 	struct termios orig, t;
 	tcgetattr(STDIN_FILENO, &orig);
