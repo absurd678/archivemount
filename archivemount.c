@@ -111,18 +111,18 @@ enum {
 
 #define AR_OPT(t, p, v) {t, offsetof(struct options, p), v}
 
-static struct fuse_opt ar_opts[] = {AR_OPT("readonly", readonly, 1),
-                                    AR_OPT("password", password, 1),
-                                    AR_OPT("nobackup", nobackup, 1),
-                                    AR_OPT("nosave", nosave, 1),
-                                    AR_OPT("subtree=%s", subtree_filter, 1),
-                                    AR_OPT("formatraw", formatraw, 1),
+static const struct fuse_opt ar_opts[] = {AR_OPT("readonly", readonly, 1),
+                                          AR_OPT("password", password, 1),
+                                          AR_OPT("nobackup", nobackup, 1),
+                                          AR_OPT("nosave", nosave, 1),
+                                          AR_OPT("subtree=%s", subtree_filter, 1),
+                                          AR_OPT("formatraw", formatraw, 1),
 
-                                    FUSE_OPT_KEY("-V", KEY_VERSION),
-                                    FUSE_OPT_KEY("--version", KEY_VERSION),
-                                    FUSE_OPT_KEY("-h", KEY_HELP),
-                                    FUSE_OPT_KEY("--help", KEY_HELP),
-                                    FUSE_OPT_END};
+                                          FUSE_OPT_KEY("-V", KEY_VERSION),
+                                          FUSE_OPT_KEY("--version", KEY_VERSION),
+                                          FUSE_OPT_KEY("-h", KEY_HELP),
+                                          FUSE_OPT_KEY("--help", KEY_HELP),
+                                          FUSE_OPT_END};
 
 
 /***********/
@@ -136,12 +136,12 @@ static bool archiveModified  = false;
 static bool archiveWriteable = false;
 static NODE * root;
 static FORMATRAW_CACHE rawcache;
-struct options options;
-char * mtpt                 = NULL;
-char * archiveFile          = NULL;
-char * user_passphrase      = NULL;
-size_t user_passphrase_size = 0;
-pthread_mutex_t lock; /* global node tree lock */
+static struct options options;
+static char * mtpt                 = NULL;
+static char * archiveFile          = NULL;
+static char * user_passphrase      = NULL;
+static size_t user_passphrase_size = 0;
+static pthread_mutex_t lock; /* global node tree lock */
 
 /* Taken from the GNU under the GPL */
 char * strchrnul(const char * s, int c_in) {
@@ -184,7 +184,7 @@ static void usage(const char * progname) {
 	        progname);
 }
 
-static struct fuse_operations ar_oper;
+static const struct fuse_operations ar_oper;
 
 static int ar_opt_proc(void * data, const char * arg, int key, struct fuse_args * outargs) {
 	(void)data;
@@ -565,7 +565,7 @@ static NODE * firstchild(NODE * node) {
 	return ret ? *ret : NULL;
 }
 
-void correct_name_in_entry(NODE * node) {
+static void correct_name_in_entry(NODE * node) {
 	if(root->children && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
 		log("correcting name in entry to '%s'", node->name + 1);
 		archive_entry_set_pathname(node->entry, node->name + 1);
@@ -2454,7 +2454,7 @@ static int ar_create(const char * path, mode_t mode, struct fuse_file_info * fi)
 	return 0;
 }
 
-static struct fuse_operations ar_oper = {
+static const struct fuse_operations ar_oper = {
     .getattr  = ar_getattr,
     .readlink = ar_readlink,
     .mknod    = ar_mknod,
@@ -2507,7 +2507,7 @@ static struct termios noEcho() {
 	return orig;
 }
 
-ssize_t getPassphrase(char ** lineptr, size_t * n, FILE * stream) {
+static ssize_t getPassphrase(char ** lineptr, size_t * n, FILE * stream) {
 	ssize_t ret = getline(lineptr, n, stream);
 	/* Strip newline off the end */
 	if(ret > 0 && (*lineptr)[ret - 1] == '\n') {
