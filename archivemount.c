@@ -62,6 +62,9 @@
 #else
 #define log(format, ...) fprintf(stderr, "l. %4d: " format "\n", __LINE__, ##__VA_ARGS__)
 #endif
+#define lerr(format, ...) fprintf(stderr, "archivemount: %s: " format "\n", __func__, ##__VA_ARGS__)
+#define lerrnum(err) lerr("%s", strerror(err))
+#define lerrno() lerrnum(errno)
 
 
 /*******************/
@@ -225,7 +228,7 @@ static NODE * init_node() {
 	NODE * node;
 
 	if((node = malloc(sizeof(NODE))) == NULL) {
-		log("Out of memory");
+		lerrno();
 		return NULL;
 	}
 
@@ -239,7 +242,7 @@ static NODE * init_node() {
 	node->modified    = 0;
 
 	if(node->entry == NULL) {
-		log("Out of memory");
+		lerrno();
 		free(node);
 		return NULL;
 	}
@@ -298,15 +301,15 @@ static int insert_by_path(NODE * root, NODE * node) {
 				return -ENOMEM;
 
 			if(asprintf(&tempnode->name, "%s/%s", last != root ? last->name : "", nam) == -1) {
-				log("Out of memory");
-				return -ENOMEM;
+				lerrno();
+				return -errno;
 			}
 			tempnode->basename = strrchr(tempnode->name, '/') + 1;
 
 			archive_entry_free(tempnode->entry);
 
 			if((tempnode->entry = archive_entry_clone(root->entry)) == NULL) {
-				log("Out of memory");
+				lerrnum(ENOMEM);
 				return -ENOMEM;
 			}
 			/* insert it recursively */
@@ -326,8 +329,8 @@ static int insert_by_path(NODE * root, NODE * node) {
 			   node, just update the entry */
 			archive_entry_free(node->entry);
 			if((node->entry = archive_entry_clone((*found)->entry)) == NULL) {
-				log("Out of memory");
-				return -ENOMEM;
+				lerrno();
+				return -errno;
 			}
 		} else {
 			insert_as_child(node, cur);
@@ -348,31 +351,31 @@ static int build_tree(const char * mtpt) {
 	regex_t subtree;
 	int regex_error;
 	regmatch_t regmatch;
-	char error_buffer[256];
 
 #define PREFIX "^\\.\\?"
-
 	if(options.subtree_filter) {
 		if(asprintf(&subtree_filter, PREFIX "%s", options.subtree_filter) == -1) {
-			log("Not enough memory");
-			return -ENOMEM;
+			lerrno();
+			return -errno;
 		}
 		/* \? is only a special char on Mac if REG_ENHANCED is specified  */
-#if defined REG_ENHANCED
-		regex_error = regcomp(&subtree, subtree_filter, REG_ENHANCED);
-#else
-		regex_error = regcomp(&subtree, subtree_filter, 0);
+#ifndef REG_ENHANCED
+#define REG_ENHANCED 0
 #endif
-		if(regex_error) {
-			regerror(regex_error, &subtree, error_buffer, 256);
-			log("Regex build error: %s\n", error_buffer);
-			return -regex_error;
+		if((regex_error = regcomp(&subtree, subtree_filter, REG_ENHANCED))) {
+			int es = regerror(regex_error, &subtree, NULL, 0);
+			char * eb = malloc(es);
+			if(eb)
+				regerror(regex_error, &subtree, eb, es);
+			lerr("regex error%s%s\n", eb ? ": " : "", eb);
+			free(eb);
+			return -EINVAL;
 		}
 		options.readonly = 1;
 	}
 	/* open archive */
 	if((archive = archive_read_new()) == NULL) {
-		log("Out of memory");
+		lerrnum(ENOMEM);
 		return -ENOMEM;
 	}
 	if(archive_read_support_filter_all(archive) != ARCHIVE_OK) {
@@ -418,10 +421,7 @@ static int build_tree(const char * mtpt) {
 	root->basename = &root->name[1];
 
 	/* fill root->entry */
-	if(fstat(archiveFd, &st) != 0) {
-		perror("Error stat'ing archiveFile");
-		return errno;
-	}
+	fstat(archiveFd, &st);
 	archive_entry_set_gid(root->entry, getgid());
 	archive_entry_set_uid(root->entry, getuid());
 	archive_entry_set_mode(root->entry, st.st_mtime);
@@ -444,14 +444,9 @@ static int build_tree(const char * mtpt) {
 			continue;
 		}
 		if(options.subtree_filter) {
-			regex_error = regexec(&subtree, name, 1, &regmatch, REG_NOTEOL);
-			if(regex_error) {
-				if(regex_error == REG_NOMATCH)
-					continue;
-				regerror(regex_error, &subtree, error_buffer, 256);
-				log("Regex match error: %s\n", error_buffer);
-				return -regex_error;
-			}
+			if(regexec(&subtree, name, 1, &regmatch, REG_NOTEOL) == REG_NOMATCH)
+				continue;
+
 			/* strip subtree from name */
 			name += regmatch.rm_eo;
 		}
@@ -463,8 +458,8 @@ static int build_tree(const char * mtpt) {
 		} else if(name[0] != '/') {
 			/* prepend a '/' to name */
 			if(asprintf(&cur->name, "/%s", name) == -1) {
-				log("Out of memory");
-				return -ENOMEM;
+				lerrno();
+				return -errno;
 			};
 		} else {
 			/* just set the name */
@@ -479,8 +474,9 @@ static int build_tree(const char * mtpt) {
 			cur->basename = strrchr(cur->name, '/') + 1;
 
 			/* references */
-			if(insert_by_path(root, cur) != 0) {
-				log("ERROR: could not insert %s into tree", cur->name);
+			int err;
+			if((err = insert_by_path(root, cur))) {
+				lerr("ERROR: could not insert %s into tree: %s", cur->name, strerror(-err));
 				return -ENOENT;
 			}
 		} else {
@@ -689,8 +685,8 @@ static int rename_recursively(NODE * under, const char * from, const char * to) 
 		/* change node name */
 		individualName = node->name + strlen(from);
 		if(asprintf(&newName, "%s%s%s", *to != '/' ? "/" : "", to, individualName) == -1) {
-			log("Out of memory");
-			return -ENOMEM;
+			lerrno();
+			return -errno;
 		}
 		log("new name: '%s'", newName);
 		correct_hardlinks_to_node(node->name, newName);
@@ -714,9 +710,9 @@ static int get_temp_file_name(char ** location) {
 	if(asprintf(location, "%s/archivemount_XXXXXX", tmpdir) == -1)
 		return -errno;
 	if((fh = mkstemp(*location)) == -1) {
-		log("Could not create temp file name %s: %s", *location, strerror(errno));
+		lerr("%s: %s", *location, strerror(errno));
 		free(*location);
-		return 0 - errno;
+		return -errno;
 	}
 	close(fh);
 	unlink(*location);
@@ -733,7 +729,7 @@ static int update_entry_stat(NODE * node) {
 	struct group * grp;
 
 	if(lstat(node->location, &st) != 0) {
-		return 0 - errno;
+		return -errno;
 	}
 	archive_entry_set_gid(node->entry, st.st_gid);
 	archive_entry_set_uid(node->entry, st.st_uid);
@@ -765,16 +761,14 @@ static void write_new_modded_file(NODE * node, struct archive_entry * wentry, st
 		ssize_t len = 0;
 		/* copy stat info */
 		if(lstat(node->location, &st) != 0) {
-			log("Could not lstat temporary file %s: %s", node->location, strerror(errno));
+			lerr("Could not lstat temporary file %s: %s", node->location, strerror(errno));
 			return;
 		}
 		archive_entry_copy_stat(wentry, &st);
 		/* open temporary file */
 		fh = open(node->location, O_RDONLY);
 		if(fh == -1) {
-			log("Fatal error opening modified file %s at "
-			    "location %s, giving up",
-			    node->name, node->location);
+			lerr("Fatal error opening modified file %s at location %s, giving up", node->name, node->location);
 			return;
 		}
 		/* write header */
@@ -782,7 +776,7 @@ static void write_new_modded_file(NODE * node, struct archive_entry * wentry, st
 		if(S_ISREG(st.st_mode)) {
 			/* regular file, copy data */
 			if((buf = malloc(MAXBUF)) == NULL) {
-				log("Out of memory");
+				lerrno();
 				return;
 			}
 			while((len = pread(fh, buf, (size_t)MAXBUF, offset)) > 0) {
@@ -792,20 +786,18 @@ static void write_new_modded_file(NODE * node, struct archive_entry * wentry, st
 			free(buf);
 		}
 		if(len == -1) {
-			log("Error reading temporary file %s for file %s: %s", node->location, node->name, strerror(errno));
+			lerr("Error reading temporary file %s for file %s: %s", node->location, node->name, strerror(errno));
 			close(fh);
 			return;
 		}
 		/* clean up */
 		close(fh);
 		if(S_ISDIR(st.st_mode)) {
-			if(rmdir(node->location) == -1) {
-				log("WARNING: rmdir '%s' failed: %s", node->location, strerror(errno));
-			}
+			if(rmdir(node->location) == -1)
+				lerr("WARNING: rmdir '%s' failed: %s", node->location, strerror(errno));
 		} else {
-			if(unlink(node->location) == -1) {
-				log("WARNING: unlinking '%s' failed: %s", node->location, strerror(errno));
-			}
+			if(unlink(node->location) == -1)
+				lerr("WARNING: unlinking '%s' failed: %s", node->location, strerror(errno));
 		}
 	} else {
 		/* no data, only write header (e.g. when node is a link!) */
@@ -830,8 +822,8 @@ static int save(const char * archiveFile) {
 	 * compressed archives, so a new archive has to be written */
 	/* rename old archive */
 	if(asprintf(&oldfilename, "%s.orig", archiveFile) == -1) {
-		log("Could not allocate memory for oldfilename");
-		return -ENOMEM;
+		lerrno();
+		return -errno;
 	}
 	close(archiveFd);
 	if(rename(archiveFile, oldfilename) == -1) {
@@ -846,30 +838,30 @@ static int save(const char * archiveFile) {
 	free(oldfilename);
 	/* open old archive */
 	if((oldarc = archive_read_new()) == NULL) {
-		log("Out of memory");
+		lerrnum(ENOMEM);
 		return -ENOMEM;
 	}
 	if(archive_read_support_filter_all(oldarc) != ARCHIVE_OK) {
-		log("%s", archive_error_string(oldarc));
+		lerr("%s", archive_error_string(oldarc));
 		return archive_errno(oldarc);
 	}
 	if(archive_read_support_format_all(oldarc) != ARCHIVE_OK) {
-		log("%s", archive_error_string(oldarc));
+		lerr("%s", archive_error_string(oldarc));
 		return archive_errno(oldarc);
 	}
 	if(options.password) {
 		if(archive_read_add_passphrase(oldarc, user_passphrase) != ARCHIVE_OK) {
-			fprintf(stderr, "%s\n", archive_error_string(oldarc));
+			lerr("%s", archive_error_string(oldarc));
 			return archive_errno(oldarc);
 		}
 	}
 	if(archive_read_open_fd(oldarc, archiveFd, BLOCK_SIZE) != ARCHIVE_OK) {
-		log("%s", archive_error_string(oldarc));
+		lerr("%s", archive_error_string(oldarc));
 		return archive_errno(oldarc);
 	}
 	/* Read first header of oldarc so that archive format is set. */
 	if(archive_read_next_header(oldarc, &entry) != ARCHIVE_OK) {
-		log("%s", archive_error_string(oldarc));
+		lerr("%s", archive_error_string(oldarc));
 		return archive_errno(oldarc);
 	}
 	format      = archive_format(oldarc);
@@ -878,20 +870,18 @@ static int save(const char * archiveFile) {
 	log("mounted archive compression is %s (0x%x)", archive_filter_name(oldarc, 0), compression);
 	/* open new archive */
 	if((newarc = archive_write_new()) == NULL) {
-		log("Out of memory");
+		lerrnum(ENOMEM);
 		return -ENOMEM;
 	}
 	archive_write_add_filter(newarc, compression);
 	if(archive_write_set_format(newarc, format) != ARCHIVE_OK) {
-		log("writing archives of format %d (%s) is not "
-		    "supported",
-		    format, archive_format_name(oldarc));
+		lerr("writing archives of format %d (%s) is not supported", format, archive_format_name(oldarc));
 		return -ENOTSUP;
 	}
-	tempfile = open(archiveFile, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+	tempfile = open(archiveFile, O_WRONLY | O_CREAT | O_EXCL, 0644);
 	if(tempfile == -1) {
-		log("could not open new archive file for writing");
-		return 0 - errno;
+		lerr("could not open new archive file for writing: %s", strerror(errno));
+		return -errno;
 	}
 	if(options.password) {
 		/* When libarchive gains support for multiple kinds of encryption and
@@ -899,16 +889,16 @@ static int save(const char * archiveFile) {
 		 * encryption settings.  For now, just set the one kind of encryption
 		 * that libarchive supports. */
 		if(archive_write_set_options(newarc, "zip:encryption=aes256") != ARCHIVE_OK) {
-			log("Could not set encryption for new archive: %s", archive_error_string(newarc));
+			lerr("Could not set encryption for new archive: %s", archive_error_string(newarc));
 			return archive_errno(newarc);
 		}
 		if(archive_write_set_passphrase(newarc, user_passphrase) != ARCHIVE_OK) {
-			log("Could not set passphrase for new archive: %s", archive_error_string(newarc));
+			lerr("Could not set passphrase for new archive: %s", archive_error_string(newarc));
 			return archive_errno(newarc);
 		}
 	}
 	if(archive_write_open_fd(newarc, tempfile) != ARCHIVE_OK) {
-		log("%s", archive_error_string(newarc));
+		lerr("%s", archive_error_string(newarc));
 		return archive_errno(newarc);
 	}
 	do {
@@ -927,7 +917,7 @@ static int save(const char * archiveFile) {
 		}
 		/* create new entry, copy metadata */
 		if((wentry = archive_entry_new()) == NULL) {
-			log("Out of memory");
+			lerrnum(ENOMEM);
 			return -ENOMEM;
 		}
 		if(archive_entry_gname_w(node->entry)) {
@@ -985,9 +975,9 @@ static int save(const char * archiveFile) {
 	close(archiveFd);
 	archiveFd = open(archiveFile, O_RDONLY);
 	if(options.nobackup) {
-		if(remove(oldfilename) < 0) {
-			log("Could not remove .orig archive file (%s): %s", oldfilename, strerror(errno));
-			return 0 - errno;
+		if(unlink(oldfilename) == -1) {
+			lerr("Could not remove .orig archive file (%s): %s", oldfilename, strerror(errno));
+			return -errno;
 		}
 	}
 	return 0;
@@ -1162,13 +1152,13 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 			log("Fatal error opening modified file '%s' at "
 			    "location '%s', giving up",
 			    path, node->location);
-			return 0 - errno;
+			return -errno;
 		}
 		/* copy data */
 		if((ret = pread(fh, buf, size, offset)) == -1) {
 			log("Error reading temporary file '%s': %s", node->location, strerror(errno));
 			close(fh);
-			ret = 0 - errno;
+			ret = -errno;
 		}
 		/* clean up */
 		close(fh);
@@ -1455,7 +1445,7 @@ static int ar_mkdir(const char * path, mode_t mode) {
 		log("Could not create temporary dir %s: %s", location, strerror(errno));
 		free(location);
 		pthread_mutex_unlock(&lock);
-		return 0 - errno;
+		return -errno;
 	}
 	/* build node */
 	if((node = init_node()) == NULL) {
@@ -1597,7 +1587,7 @@ static int ar_symlink(const char * from, const char * to) {
 			log("ERROR calling getpwuid: %s", strerror(errno));
 			free_node(node);
 			pthread_mutex_unlock(&lock);
-			return 0 - errno;
+			return -errno;
 		}
 		/* on other errors the uid just could
 		   not be resolved into a name */
@@ -1611,7 +1601,7 @@ static int ar_symlink(const char * from, const char * to) {
 			log("ERROR calling getgrgid: %s", strerror(errno));
 			free_node(node);
 			pthread_mutex_unlock(&lock);
-			return 0 - errno;
+			return -errno;
 		}
 		/* on other errors the gid just could
 		   not be resolved into a name */
@@ -1681,7 +1671,7 @@ static int ar_link(const char * from, const char * to) {
 			log("ERROR calling getpwuid: %s", strerror(errno));
 			free_node(node);
 			pthread_mutex_unlock(&lock);
-			return 0 - errno;
+			return -errno;
 		}
 		/* on other errors the uid just could
 		   not be resolved into a name */
@@ -1695,7 +1685,7 @@ static int ar_link(const char * from, const char * to) {
 			log("ERROR calling getgrgid: %s", strerror(errno));
 			free_node(node);
 			pthread_mutex_unlock(&lock);
-			return 0 - errno;
+			return -errno;
 		}
 		/* on other errors the gid just could
 		   not be resolved into a name */
@@ -1742,7 +1732,7 @@ static int _ar_truncate(const char * path, off_t size) {
 		if((fh = open(location, O_WRONLY)) == -1) {
 			log("error opening temp file %s: %s", location, strerror(errno));
 			unlink(location);
-			return 0 - errno;
+			return -errno;
 		}
 	} else {
 		/* create new temp file */
@@ -1756,7 +1746,7 @@ static int _ar_truncate(const char * path, off_t size) {
 		if((fh = open(location, O_WRONLY | O_CREAT | O_EXCL, archive_entry_mode(node->entry))) == -1) {
 			log("error opening temp file %s: %s", location, strerror(errno));
 			unlink(location);
-			return 0 - errno;
+			return -errno;
 		}
 		/* copy original file to temporary file */
 		tmpsize = archive_entry_size(node->entry);
@@ -1778,7 +1768,7 @@ static int _ar_truncate(const char * path, off_t size) {
 			}
 			/* write */
 			if(write(fh, tmpbuf, tmp) == -1) {
-				tmp = 0 - errno;
+				tmp = -errno;
 				log("ERROR writing while copying %s to "
 				    "temporary location %s: %s",
 				    path, location, strerror(errno));
@@ -1800,7 +1790,7 @@ static int _ar_truncate(const char * path, off_t size) {
 	}
 	/* truncate temporary file */
 	if((ret = truncate(location, size)) == -1) {
-		tmp = 0 - errno;
+		tmp = -errno;
 		log("ERROR truncating %s (temporary location %s): %s", path, location, strerror(errno));
 		close(fh);
 		unlink(location);
@@ -1863,7 +1853,7 @@ static int _ar_write(const char * path, const char * buf, size_t size, off_t off
 		if((fh = open(location, O_WRONLY)) == -1) {
 			log("error opening temp file %s: %s", location, strerror(errno));
 			unlink(location);
-			return 0 - errno;
+			return -errno;
 		}
 	} else {
 		/* create new temp file */
@@ -1876,7 +1866,7 @@ static int _ar_write(const char * path, const char * buf, size_t size, off_t off
 		if((fh = open(location, O_WRONLY | O_CREAT | O_EXCL, archive_entry_mode(node->entry))) == -1) {
 			log("error opening temp file %s: %s", location, strerror(errno));
 			unlink(location);
-			return 0 - errno;
+			return -errno;
 		}
 		/* copy original file to temporary file */
 		tmpsize = archive_entry_size(node->entry);
@@ -1898,7 +1888,7 @@ static int _ar_write(const char * path, const char * buf, size_t size, off_t off
 			}
 			/* write */
 			if(write(fh, tmpbuf, len) == -1) {
-				tmp = 0 - errno;
+				tmp = -errno;
 				log("ERROR writing while copying %s to "
 				    "temporary location %s: %s",
 				    path, location, strerror(errno));
@@ -1916,7 +1906,7 @@ static int _ar_write(const char * path, const char * buf, size_t size, off_t off
 	}
 	/* write changes to temporary file */
 	if((ret = pwrite(fh, buf, size, offset)) == -1) {
-		tmp = 0 - errno;
+		tmp = -errno;
 		log("ERROR writing changes to %s (temporary "
 		    "location %s): %s",
 		    path, location, strerror(errno));
@@ -1974,7 +1964,7 @@ static int ar_mknod(const char * path, mode_t mode, dev_t rdev) {
 		log("Could not create temporary file %s: %s", location, strerror(errno));
 		free(location);
 		pthread_mutex_unlock(&lock);
-		return 0 - errno;
+		return -errno;
 	}
 	/* build node */
 	if((node = init_node()) == NULL) {
@@ -2401,7 +2391,7 @@ static int ar_create(const char * path, mode_t mode, struct fuse_file_info * fi)
 		log("Could not create temporary file %s: %s", location, strerror(errno));
 		free(location);
 		pthread_mutex_unlock(&lock);
-		return 0 - errno;
+		return -errno;
 	}
 	/* build node */
 	if((node = init_node()) == NULL) {
@@ -2511,27 +2501,27 @@ int main(int argc, char ** argv) {
 	if(archiveFile == NULL) {
 		fprintf(stderr, "missing archive file\n");
 		fprintf(stderr, "see `%s -h' for usage\n", argv[0]);
-		exit(1);
+		return(1);
 	}
 	if(mtpt == NULL) {
 		fprintf(stderr, "missing mount point\n");
 		fprintf(stderr, "see `%s -h' for usage\n", argv[0]);
-		exit(1);
+		return(1);
 	}
 
 	/* check if mtpt is ok and writeable */
 	if(stat(mtpt, &st) != 0) {
-		perror("Error stat'ing mountpoint");
-		exit(EXIT_FAILURE);
+		lerr("%s: %s", mtpt, strerror(errno));
+		return(1);
 	}
 	if(!S_ISDIR(st.st_mode)) {
-		fprintf(stderr, "Problem with mountpoint: %s\n", strerror(ENOTDIR));
-		exit(EXIT_FAILURE);
+		lerr("%s: %s", mtpt, strerror(ENOTDIR));
+		return(1);
 	}
 
 	if(options.password) {
 		struct termios orig = noEcho();
-		fputs("Enter passphrase:", stderr);
+		fputs("Enter passphrase: ", stderr);
 		getPassphrase(&user_passphrase, &user_passphrase_size, stdin);
 		fputs("\n", stderr);
 		tcsetattr(STDIN_FILENO, TCSANOW, &orig);
@@ -2556,16 +2546,15 @@ int main(int argc, char ** argv) {
 	/* open archive and read meta data */
 	archiveFd = open(archiveFile, O_RDONLY);
 	if(archiveFd == -1) {
-		perror("opening archive failed");
-		return EXIT_FAILURE;
+		lerr("%s: %s", archiveFile, strerror(errno));
+		return 1;
 	}
 	if(build_tree(mtpt) != 0) {
-		exit(EXIT_FAILURE);
+		return(1);
 	}
 
 	if(options.formatraw) {
 		/* create rawcache */
-		fprintf(stderr, "Calculating uncompressed file size. Please wait.\n");
 		rawcache.st.st_size = _ar_getsizeraw("/data");
 		// log("cache st_size = %ld",rawcache.st.st_size);
 	}
@@ -2601,20 +2590,20 @@ int main(int argc, char ** argv) {
 #endif
 		);
 		if(res == -1)
-			exit(1);
+			return(1);
 
 		ch = fuse_mount(mountpoint, &args);
 		if(!ch)
-			exit(1);
+			return(1);
 
 		res = fcntl(fuse_chan_fd(ch), F_SETFD, FD_CLOEXEC);
 		if(res == -1)
-			perror("WARNING: failed to set FD_CLOEXEC on fuse device");
+			lerr("WARNING: failed to set FD_CLOEXEC on fuse device");
 
 		fuse = fuse_new(ch, &args, &ar_oper, sizeof(struct fuse_operations), NULL);
 		if(fuse == NULL) {
 			fuse_unmount(mountpoint, ch);
-			exit(1);
+			return(1);
 		}
 
 		/* now do the real mount */
@@ -2625,7 +2614,7 @@ int main(int argc, char ** argv) {
 		if(res == -1) {
 			fuse_unmount(mountpoint, ch);
 			fuse_destroy(fuse);
-			exit(1);
+			return(1);
 		}
 
 		if(multithreaded)
@@ -2654,7 +2643,7 @@ int main(int argc, char ** argv) {
 	if(archiveWriteable && !options.readonly && archiveModified && !options.nosave) {
 		int err;
 		if(fchdir(oldwd)) {
-			fprintf(stderr, "fchdir() to old path failed\n");
+			fprintf(stderr, "fchdir() to old path failed, can't save new archive\n");
 		} else if((err = save(archiveFile))) {
 			fprintf(stderr, "Saving new archive failed: %s\n", strerror(-err));
 		}
