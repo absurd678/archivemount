@@ -11,31 +11,36 @@ You will need GNU Make, libarchive-dev, libfuse-dev, and pkgconf
 
 -ng
 ------------
+The upstream author appears dead since 2020. This encompasses the upstream tarballs and, at least, fixes the following issues.
+
 Debian bugs:
-  [ ] #799563: Failed to list correctly the files when parent directory name and child directory names are the same
-  [ ] #687710: cannot read ISO-9660 archives
-  [ ] #832823: new upstream version (0.8.7)
-  [ ] #838597: Unmount instructions in man page lead to "Permission denied" error.
-  [ ] #891749: New upstream version (0.8.9)
-  [ ] #974679: Wrong homepage + new version
-  [ ] #651442: does not handle compressed (single) files
-  [ ] #857985: appears a kernel upgrade changed the ABI unexpectedly
-  [ ] #674231: Add 7zip support
+  [0.8.9] #799563:  Failed to list correctly the files when parent directory name and child directory names are the same
+  [lllll] #687710:  cannot read ISO-9660 archives
+  [xxxxx] #832823:  new upstream version (0.8.7)
+  [     ] #838597:  Unmount instructions in man page lead to "Permission denied" error.
+  [xxxxx] #891749:  New upstream version (0.8.9)
+  [xxxxx] #974679:  Wrong homepage + new version
+  [0.8.4] #651442:  does not handle compressed (single) files
+  [     ] #857985:  appears a kernel upgrade changed the ABI unexpectedly
+  [lllll] #674231:  Add 7zip support
+  [1-1  ] #1073228: uthash is BSD-1-Clause, not BSD-2-Clause
 
 Upstream (https://github.com/cybernoid/archivemount) bugs:
-  [ ] #28: Chokes on CSRG ISO
-  [ ] #21: Quadratic complexity when reading large entries
-  [ ] #27: fuse.pc is fuse3.pc nowadays
-  [ ] #26: feature request: zstd support
-  [ ] #25: archivemount can't read .img.gz
-  [ ] #23: feature request: .xz compressed files support?
-  [ ] #14: Create a table which shows supported formats && read / write support
-  [ ] #17: Update homepage in apt show archivemount
+  [0.8.9] #28: Chokes on CSRG ISO
+  [     ] #21: Quadratic complexity when reading large entries
+  [     ] #27: fuse.pc is fuse3.pc nowadays
+  [     ] #26: feature request: zstd support
+  [     ] #25: archivemount can't read .img.gz
+  [     ] #23: feature request: .xz compressed files support?
+  [     ] #14: Create a table which shows supported formats && read / write support
+  [     ] #17: Update homepage in apt show archivemount
 PRs:
-  [ ] #22: Add support for fuse3
-  [ ] #20: Add support for /dev/fd/%u mountpoints
-  [ ] #19: Don't fchdir at unmount when mounting read-only
-  [ ] #18: Honor raw archives' pathname
+  [     ] #22: Add support for fuse3
+  [     ] #20: Add support for /dev/fd/%u mountpoints
+  [     ] #19: Don't fchdir at unmount when mounting read-only
+  [     ] #18: Honor raw archives' pathname
+
+x – fundamentally invalid; l – libarchive bug
 
 Write support
 -------------

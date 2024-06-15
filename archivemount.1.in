@@ -90,7 +90,9 @@ Implies
 .
 .It Fl o Cm formatraw
 .Ar archive
-is actually a file, exposed verbatim as
+is actually a file, exposed verbatim
+.Em but uncompressed
+as
 .Ar mounpoint Ns Pa /data .
 Implies
 .Fl o Cm readonly .
