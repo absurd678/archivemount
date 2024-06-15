@@ -52,6 +52,7 @@
 #include <unistd.h>
 #include <utime.h>
 #include <wchar.h>
+#include <stdbool.h>
 
 /**********/
 /* macros */
@@ -74,9 +75,9 @@ typedef struct node {
 	void * children;              /* tsearch(3) tree */
 	char * name;                  /* fully qualified with prepended '/' */
 	char * location;              /* location on disk for new/modified files, else NULL */
-	int namechanged;              /* true when file was renamed */
 	struct archive_entry * entry; /* libarchive header data */
-	int modified;                 /* true when node was modified */
+	bool namechanged;              /* true when file was renamed */
+	bool modified;                 /* true when node was modified */
 } NODE;
 struct falsenode {
 	const char * basename;
@@ -131,8 +132,8 @@ static struct fuse_opt ar_opts[] = {AR_OPT("readonly", readonly, 1),
 static int archiveFd; /* file descriptor of archive file, just to keep the
        beast alive in case somebody deletes the file while
        it is mounted */
-static int archiveModified  = 0;
-static int archiveWriteable = 0;
+static bool archiveModified  = false;
+static bool archiveWriteable = false;
 static NODE * root;
 static FORMATRAW_CACHE rawcache;
 struct options options;
@@ -232,7 +233,7 @@ static NODE * init_node() {
 	node->name        = NULL;
 	node->basename    = NULL;
 	node->location    = NULL;
-	node->namechanged = 0;
+	node->namechanged = false;
 	node->entry       = archive_entry_new();
 	node->modified    = 0;
 
@@ -409,7 +410,7 @@ static int build_tree(const char * mtpt) {
 	log("mounted archive compression is %s (0x%x)", archive_filter_name(archive, 0), compression);
 	if(format & ARCHIVE_FORMAT_ISO9660 || format & ARCHIVE_FORMAT_ISO9660_ROCKRIDGE || format & ARCHIVE_FORMAT_ZIP ||
 	   compression == ARCHIVE_COMPRESSION_COMPRESS) {
-		archiveWriteable = 0;
+		archiveWriteable = false;
 	}
 	/* create root node */
 	if((root = init_node()) == NULL)
@@ -698,7 +699,7 @@ static int rename_recursively(NODE * under, const char * from, const char * to) 
 		free(node->name);
 		node->name        = newName;
 		node->basename    = strrchr(node->name, '/') + 1;
-		node->namechanged = 1;
+		node->namechanged = true;
 		insert_by_path(root, node);
 	}
 	return ret;
@@ -814,7 +815,7 @@ static void write_new_modded_file(NODE * node, struct archive_entry * wentry, st
 		archive_write_header(newarc, wentry);
 	}
 	/* mark file as written */
-	node->modified = 0;
+	node->modified = false;
 }
 
 static int save(const char * archiveFile) {
@@ -1484,7 +1485,7 @@ static int ar_mkdir(const char * path, mode_t mode) {
 	node->modified    = 1;
 	node->name        = strdup(path);
 	node->basename    = strrchr(node->name, '/') + 1;
-	node->namechanged = 0;
+	node->namechanged = false;
 	/* build entry */
 	if(root->children && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
 		archive_entry_set_pathname(node->entry, node->name + 1);
@@ -1509,7 +1510,7 @@ static int ar_mkdir(const char * path, mode_t mode) {
 		return -ENOENT;
 	}
 	/* clean up */
-	archiveModified = 1;
+	archiveModified = true;
 	pthread_mutex_unlock(&lock);
 	return 0;
 }
@@ -1555,7 +1556,7 @@ static int ar_rmdir(const char * path) {
 	}
 	remove_child(node);
 	free_node(node);
-	archiveModified = 1;
+	archiveModified = true;
 	pthread_mutex_unlock(&lock);
 	return 0;
 }
@@ -1584,7 +1585,7 @@ static int ar_symlink(const char * from, const char * to) {
 	}
 	node->name     = strdup(to);
 	node->basename = strrchr(node->name, '/') + 1;
-	node->modified = 1;
+	node->modified = true;
 	/* build stat info */
 	st.st_dev     = 0;
 	st.st_ino     = 0;
@@ -1642,7 +1643,7 @@ static int ar_symlink(const char * from, const char * to) {
 		return -ENOENT;
 	}
 	/* clean up */
-	archiveModified = 1;
+	archiveModified = true;
 	pthread_mutex_unlock(&lock);
 	return 0;
 }
@@ -1680,7 +1681,7 @@ static int ar_link(const char * from, const char * to) {
 	}
 	node->name     = strdup(to);
 	node->basename = strrchr(node->name, '/') + 1;
-	node->modified = 1;
+	node->modified = true;
 	/* build entry */
 	if(node->name[0] == '/' && archive_entry_pathname(fromnode->entry)[0] != '/') {
 		archive_entry_set_pathname(node->entry, node->name + 1);
@@ -1726,7 +1727,7 @@ static int ar_link(const char * from, const char * to) {
 		return -ENOENT;
 	}
 	/* clean up */
-	archiveModified = 1;
+	archiveModified = true;
 	pthread_mutex_unlock(&lock);
 	return 0;
 }
@@ -1826,7 +1827,7 @@ static int _ar_truncate(const char * path, off_t size) {
 	}
 	/* record location, update entry */
 	node->location = location;
-	node->modified = 1;
+	node->modified = true;
 	if((tmp = update_entry_stat(node)) < 0) {
 		log("write: error stat'ing file %s: %s", node->location, strerror(0 - tmp));
 		close(fh);
@@ -1835,7 +1836,7 @@ static int _ar_truncate(const char * path, off_t size) {
 	}
 	/* clean up */
 	close(fh);
-	archiveModified = 1;
+	archiveModified = true;
 	return ret;
 }
 
@@ -1944,7 +1945,7 @@ static int _ar_write(const char * path, const char * buf, size_t size, off_t off
 	}
 	/* record location, update entry */
 	node->location = location;
-	node->modified = 1;
+	node->modified = true;
 	if((tmp = update_entry_stat(node)) < 0) {
 		log("write: error stat'ing file %s: %s", node->location, strerror(0 - tmp));
 		close(fh);
@@ -1953,7 +1954,7 @@ static int _ar_write(const char * path, const char * buf, size_t size, off_t off
 	}
 	/* clean up */
 	close(fh);
-	archiveModified = 1;
+	archiveModified = true;
 	return ret;
 }
 
@@ -2000,7 +2001,7 @@ static int ar_mknod(const char * path, mode_t mode, dev_t rdev) {
 		return -ENOMEM;
 	}
 	node->location = location;
-	node->modified = 1;
+	node->modified = true;
 	node->name     = strdup(path);
 	node->basename = strrchr(node->name, '/') + 1;
 
@@ -2028,7 +2029,7 @@ static int ar_mknod(const char * path, mode_t mode, dev_t rdev) {
 		return -ENOENT;
 	}
 	/* clean up */
-	archiveModified = 1;
+	archiveModified = true;
 	pthread_mutex_unlock(&lock);
 	return 0;
 }
@@ -2058,7 +2059,7 @@ static int _ar_unlink(const char * path) {
 	}
 	remove_child(node);
 	free_node(node);
-	archiveModified = 1;
+	archiveModified = true;
 	return 0;
 }
 
@@ -2095,7 +2096,7 @@ static int _ar_chmod(const char * path, mode_t mode) {
 	mode = (0777000 & archive_entry_mode(node->entry)) | (0000777 & mode);
 #endif  // __APPLE__
 	archive_entry_set_mode(node->entry, mode);
-	archiveModified = 1;
+	archiveModified = true;
 	return 0;
 }
 
@@ -2126,7 +2127,7 @@ static int _ar_chown(const char * path, uid_t uid, gid_t gid) {
 	/* changing ownership of symlinks is allowed, however */
 	archive_entry_set_uid(node->entry, uid);
 	archive_entry_set_gid(node->entry, gid);
-	archiveModified = 1;
+	archiveModified = true;
 	return 0;
 }
 
@@ -2160,7 +2161,7 @@ static int _ar_utime(const char * path, struct utimbuf * buf) {
 	}
 	archive_entry_set_mtime(node->entry, buf->modtime, 0);
 	archive_entry_set_atime(node->entry, buf->actime, 0);
-	archiveModified = 1;
+	archiveModified = true;
 	return 0;
 }
 
@@ -2239,7 +2240,7 @@ static int ar_rename(const char * from, const char * to) {
 	free(from_node->name);
 	from_node->name        = temp_name;
 	from_node->basename    = strrchr(from_node->name, '/') + 1;
-	from_node->namechanged = 1;
+	from_node->namechanged = true;
 	ret                    = insert_by_path(root, from_node);
 	if(0 != ret) {
 		log("failed to re-insert node %s", from_node->name);
@@ -2249,7 +2250,7 @@ static int ar_rename(const char * from, const char * to) {
 		 * below it is required */
 		ret = rename_recursively(from_node, from, to);
 	}
-	archiveModified = 1;
+	archiveModified = true;
 	pthread_mutex_unlock(&lock);
 	return ret;
 }
@@ -2390,6 +2391,7 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 
 
 static int ar_create(const char * path, mode_t mode, struct fuse_file_info * fi) {
+	(void) fi;
 	NODE * node;
 	char * location;
 	int tmp;
@@ -2426,7 +2428,7 @@ static int ar_create(const char * path, mode_t mode, struct fuse_file_info * fi)
 		return -ENOMEM;
 	}
 	node->location = location;
-	node->modified = 1;
+	node->modified = true;
 	node->name     = strdup(path);
 	node->basename = strrchr(node->name, '/') + 1;
 
@@ -2450,7 +2452,7 @@ static int ar_create(const char * path, mode_t mode, struct fuse_file_info * fi)
 		return -ENOENT;
 	}
 	/* clean up */
-	archiveModified = 1;
+	archiveModified = true;
 	pthread_mutex_unlock(&lock);
 	return 0;
 }
@@ -2559,14 +2561,14 @@ int main(int argc, char ** argv) {
 		/* check if archive is writeable */
 		archiveFd = open(archiveFile, O_RDWR);
 		if(archiveFd != -1) {
-			archiveWriteable = 1;
+			archiveWriteable = true;
 			close(archiveFd);
 		}
 	}
 	/* We want the temporary fuser version of the archive to be writable,*/
 	/* despite never actually writing the changes to disk.*/
 	if(options.nosave) {
-		archiveWriteable = 1;
+		archiveWriteable = true;
 	}
 
 	/* open archive and read meta data */
