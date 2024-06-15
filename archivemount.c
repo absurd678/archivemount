@@ -834,18 +834,13 @@ static int save(const char * archiveFile) {
 		return -ENOMEM;
 	}
 	close(archiveFd);
-	if(rename(archiveFile, oldfilename) < 0) {
+	if(rename(archiveFile, oldfilename) == -1) {
 		int err        = errno;
-		char * buf     = NULL;
-		char * unknown = "<unknown>";
-		if(getcwd(buf, 0) == NULL) {
-			/* getcwd failed, set buf to sth. reasonable */
-			buf = unknown;
-		}
-		log("Could not rename old archive file (%s/%s): %s", buf, archiveFile, strerror(err));
+		char * buf     = getcwd(NULL, 0);
+		log("Could not rename old archive file (%s/%s): %s", buf ?: "<unknown>", archiveFile, strerror(err));
 		free(buf);
 		archiveFd = open(archiveFile, O_RDONLY);
-		return 0 - err;
+		return -err;
 	}
 	archiveFd = open(oldfilename, O_RDONLY);
 	free(oldfilename);
@@ -2661,7 +2656,7 @@ int main(int argc, char ** argv) {
 		if(fchdir(oldwd)) {
 			fprintf(stderr, "fchdir() to old path failed\n");
 		} else if((err = save(archiveFile))) {
-			fprintf(stderr, "Saving new archive failed: %s\n", strerror(err));
+			fprintf(stderr, "Saving new archive failed: %s\n", strerror(-err));
 		}
 	}
 }
