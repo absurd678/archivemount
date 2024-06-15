@@ -2507,7 +2507,7 @@ static ssize_t getPassphrase(char ** lineptr, size_t * n, FILE * stream) {
 
 int main(int argc, char ** argv) {
 	struct stat st;
-	int oldpwd;
+	int oldwd;
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
 	/* parse cmdline args */
@@ -2576,7 +2576,7 @@ int main(int argc, char ** argv) {
 	}
 
 	/* save directory this was started from */
-	oldpwd = open(".", 0);
+	oldwd = open(".", 0);
 
 	/* Initialize the node tree lock */
 	pthread_mutex_init(&lock, NULL);
@@ -2651,35 +2651,19 @@ int main(int argc, char ** argv) {
 #else
 	{
 		/* now do the real mount */
-		int fuse_ret;
-		fuse_ret = fuse_main(args.argc, args.argv, &ar_oper, NULL);
+		fuse_main(args.argc, args.argv, &ar_oper, NULL);
 	}
 #endif
 
-	/* go back to saved dir */
-	{
-		int fchdir_ret;
-		fchdir_ret = fchdir(oldpwd);
-		if(fchdir_ret != 0) {
-			log("fchdir() to old path failed\n");
-		}
-	}
-
-	/* save changes if modified */
+	/* save changes if modified; must be in original directory (libarchive can chdir) */
 	if(archiveWriteable && !options.readonly && archiveModified && !options.nosave) {
-		if(save(archiveFile) != 0) {
-			log("Saving new archive failed\n");
+		int err;
+		if(fchdir(oldwd)) {
+			fprintf(stderr, "fchdir() to old path failed\n");
+		} else if((err = save(archiveFile))) {
+			fprintf(stderr, "Saving new archive failed: %s\n", strerror(err));
 		}
 	}
-
-	/* clean up */
-	close(archiveFd);
-	if(options.password) {
-		memset(user_passphrase, 0, user_passphrase_size);
-		free(user_passphrase);
-	}
-
-	return EXIT_SUCCESS;
 }
 
 /*
