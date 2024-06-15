@@ -886,19 +886,7 @@ static int save(const char * archiveFile) {
 		log("Out of memory");
 		return -ENOMEM;
 	}
-	switch(compression) {
-		case ARCHIVE_COMPRESSION_GZIP:
-			archive_write_add_filter_gzip(newarc);
-			break;
-		case ARCHIVE_COMPRESSION_BZIP2:
-			archive_write_add_filter_bzip2(newarc);
-			break;
-		case ARCHIVE_COMPRESSION_COMPRESS:
-		case ARCHIVE_COMPRESSION_NONE:
-		default:
-			archive_write_add_filter_none(newarc);
-			break;
-	}
+	archive_write_add_filter(newarc, compression);
 	if(archive_write_set_format(newarc, format) != ARCHIVE_OK) {
 		log("writing archives of format %d (%s) is not "
 		    "supported",
