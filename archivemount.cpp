@@ -653,7 +653,7 @@ static int update_entry_stat(NODE * node) {
 /*
  * write a new or modified file to the new archive; used from save()
  */
-_Thread_local char temp_io_buf[64 * 1024];
+thread_local char temp_io_buf[64 * 1024];
 static void write_new_modded_file(NODE * node, struct archive_entry * wentry, struct archive * newarc) {
 	if(node->location) {
 		struct stat st;
@@ -2128,42 +2128,23 @@ static const struct fuse_operations ar_oper = {
     .readlink = ar_readlink,
     .mknod    = ar_mknod,
     .mkdir    = ar_mkdir,
-    .symlink  = ar_symlink,
     .unlink   = ar_unlink,
     .rmdir    = ar_rmdir,
+    .symlink  = ar_symlink,
     .rename   = ar_rename,
     .link     = ar_link,
     .chmod    = ar_chmod,
     .chown    = ar_chown,
     .truncate = ar_truncate,
-    .utimens  = ar_utimens,
     .open     = ar_open,
     .read     = ar_read,
     .write    = ar_write,
     .statfs   = ar_statfs,
-    //.flush	  = ar_flush,  // int(*flush)(const char *, struct fuse_file_info *)
-    .release = ar_release,
-    .fsync   = ar_fsync,
-    /*
-    #ifdef HAVE_SETXATTR
-      .setxattr	= ar_setxattr,
-      .getxattr	= ar_getxattr,
-      .listxattr	= ar_listxattr,
-      .removexattr	= ar_removexattr,
-    #endif
-    */
-    //.opendir	  = ar_opendir,    // int(*opendir)(const char *, struct fuse_file_info *)
-    .readdir = ar_readdir,
-    //.releasedir	  = ar_releasedir, // int(*releasedir)(const char *, struct fuse_file_info *)
-    //.fsyncdir	  = ar_fsyncdir,   // int(*fsyncdir)(const char *, int, struct fuse_file_info *)
-    //.init		  = ar_init,	   // void *(*init)(struct fuse_conn_info *conn)
-    //.destroy	  = ar_destroy,    // void(*destroy)(void *)
-    //.access	  = ar_access,	   // int(*access)(const char *, int)
-    .create = ar_create,
-    //.ftruncate	  = ar_ftruncate,  // int(*ftruncate)(const char *, off_t, struct fuse_file_info *)
-    //.fgetattr	  = ar_fgetattr,   // int(*fgetattr)(const char *, struct stat *, struct fuse_file_info *)
-    //.lock		  = ar_lock,	   // int(*lock)(const char *, struct fuse_file_info *, int cmd, struct flock *)
-    //.bmap		  = ar_bmap,	   // int(*bmap)(const char *, size_t blocksize, uint64_t *idx)
+    .release  = ar_release,
+    .fsync    = ar_fsync,
+    .readdir  = ar_readdir,
+    .create   = ar_create,
+    .utimens  = ar_utimens,
 };
 
 static struct termios noEcho() {
@@ -2186,7 +2167,7 @@ static ssize_t getPassphrase(char ** lineptr, size_t * n, FILE * stream) {
 
 int main(int argc, char ** argv) {
 	struct stat st;
-	int oldwd;
+	int oldwd = -1;
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
 	/* parse cmdline args */

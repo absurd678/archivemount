@@ -15,7 +15,7 @@ ADD_L := $(shell for p in fuse3 libarchive; do $(PKG_CONFIG) --cflags $$p; done 
 
 CPPFLAGS += -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -DVERSION='"$(VERSION)"' $(if $(DEBUG),,-DNDEBUG)
 CFLAGS   += $(ADD_L)
-CXXFLAGS += $(ADD_L) -fno-exceptions -fno-rtti -Wno-reorder-init-list -Wno-missing-designated-field-initializers -std=c++2b  # c++23 isn't understood by everyone
+CXXFLAGS += $(ADD_L) -fno-exceptions -fno-rtti -Wno-missing-field-initializers -std=c++2b  # c++23 isn't understood by everyone
 LDLIBS   += $(shell for p in fuse3 libarchive; do $(PKG_CONFIG) --libs $$p || echo -l$${p#lib}; done 2>/dev/null)
 
 
