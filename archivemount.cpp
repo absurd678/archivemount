@@ -408,7 +408,7 @@ static int build_tree(mode_t mtpt_mode) {
 		if(lastpos)
 			*lastpos = curpos - pos;
 		lastpos = &cur->entry_size_in_archive;
-		pos = curpos;
+		pos     = curpos;
 
 		const char * name = archive_entry_pathname(cur->entry);
 		if(memcmp(name, "./", sizeof("./")) == 0) {
@@ -440,9 +440,7 @@ static int build_tree(mode_t mtpt_mode) {
 			return -errno;
 		}
 		auto len = strlen(cur->name);
-		len = std::unique(cur->name, cur->name + len, [](char l, char r) {
-			return l == '/' && r == '/';
-		}) - cur->name;
+		len      = std::unique(cur->name, cur->name + len, [](char l, char r) { return l == '/' && r == '/'; }) - cur->name;
 		if(cur->name[len - 1] == '/')
 			--len;
 		cur->name[len] = '\0';
@@ -914,7 +912,7 @@ static void nosave(NODE * node = root) {
 /* API functions */
 /*****************/
 
-static void _ar_open_raw(void)
+static void _ar_open_raw()
 //_ar_open_raw(const char *path, struct fuse_file_info *fi)
 {
 	// open archive and search first entry
@@ -1915,7 +1913,7 @@ static int ar_statfs(const char *, struct statvfs * stbuf) {
 	stbuf->f_namemax = 255;  // seems to be enforced by fuse; matches Linux
 
 	stbuf->f_frsize = stbuf->f_bsize = BLOCK_SIZE;
-	stbuf->f_blocks = (archiveFileSize + (BLOCK_SIZE - 1)) / BLOCK_SIZE;
+	stbuf->f_blocks                  = (archiveFileSize + (BLOCK_SIZE - 1)) / BLOCK_SIZE;
 
 	stbuf->f_files = count_nodes();
 	return 0;
@@ -1991,15 +1989,6 @@ static int ar_rename(const char * from, const char * to
 	return ret;
 }
 
-static int ar_fsync(const char * path, int isdatasync, struct fuse_file_info * fi) {
-	/* Just a stub.  This method is optional and can safely be left
-	   unimplemented */
-	(void)path;
-	(void)isdatasync;
-	(void)fi;
-	return 0;
-}
-
 static int ar_readlink(const char * path, char * buf, size_t size) {
 	NODE * node;
 	const char * tmp;
@@ -2052,22 +2041,13 @@ static int ar_open(const char * path, struct fuse_file_info * fi) {
 	return 0;
 }
 
-static int ar_release(const char * path, struct fuse_file_info * fi) {
-	(void)fi;
-	(void)path;
-	log("ar_release called, path '%s'", path);
-	return 0;
-}
-
-static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info * fi
+static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t, struct fuse_file_info *
 #if FUSE_MAJOR_VERSION >= 3
                       ,
                       enum fuse_readdir_flags
 #endif
 ) {
 	NODE * node;
-	(void)offset;
-	(void)fi;
 
 	// log("ar_readdir called, path: '%s' offset: %d", path, offset);
 	int ret = -EIO;
@@ -2108,14 +2088,14 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 				pthread_mutex_unlock(&lock);
 				return -ENOENT;
 			}
-			st = *archive_entry_stat(orig->entry);
+			st                    = *archive_entry_stat(orig->entry);
 			entry_size_in_archive = orig->entry_size_in_archive;
 		} else {
-			st = *archive_entry_stat(child->entry);
+			st                    = *archive_entry_stat(child->entry);
 			entry_size_in_archive = child->entry_size_in_archive;
 		}
-		st.st_blocks   = (entry_size_in_archive + 511) / 512;
-		st.st_blksize  = sizeof(temp_io_buf);
+		st.st_blocks  = (entry_size_in_archive + 511) / 512;
+		st.st_blksize = sizeof(temp_io_buf);
 
 		if(filler(buf, child->basename.data(), &st, 0
 #if FUSE_MAJOR_VERSION >= 3
@@ -2133,8 +2113,7 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 }
 
 
-static int ar_create(const char * path, mode_t mode, struct fuse_file_info * fi) {
-	(void)fi;
+static int ar_create(const char * path, mode_t mode, struct fuse_file_info *) {
 	NODE * node;
 	char * location;
 	int tmp;
@@ -2210,8 +2189,6 @@ static const struct fuse_operations ar_oper = {
     .read     = ar_read,
     .write    = ar_write,
     .statfs   = ar_statfs,
-    .release  = ar_release,
-    .fsync    = ar_fsync,
     .readdir  = ar_readdir,
     .create   = ar_create,
     .utimens  = ar_utimens,
