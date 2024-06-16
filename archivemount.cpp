@@ -56,6 +56,7 @@
 #include <unistd.h>
 #include <utime.h>
 #include <wchar.h>
+using namespace std::literals;
 
 #ifdef NDEBUG
 #define log(format, ...)
@@ -1304,7 +1305,7 @@ static int ar_rmdir(const char * path) {
 		pthread_mutex_unlock(&lock);
 		return -ENOTEMPTY;
 	}
-	if(node->name[strlen(node->name) - 1] == '.') {
+	if(node->basename == "."sv || node->basename == ".."sv) {
 		pthread_mutex_unlock(&lock);
 		return -EINVAL;
 	}
