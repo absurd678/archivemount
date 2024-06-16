@@ -323,6 +323,21 @@ static int insert_by_path(NODE * root, NODE * node) {
 	return 0;
 }
 
+static bool archive_prepopen(struct archive * archive) {
+	if(archive_read_support_filter_all(archive) != ARCHIVE_OK) {
+	err:
+		lerr("%s", archive_error_string(archive));
+		return false;
+	}
+	if((options.formatraw ? archive_read_support_format_raw : archive_read_support_format_all)(archive) != ARCHIVE_OK)
+		goto err;
+	if(options.password && archive_read_add_passphrase(archive, user_passphrase) != ARCHIVE_OK)
+		goto err;
+	if(archive_read_open_fd(archive, archiveFd, BLOCK_SIZE) != ARCHIVE_OK)
+		goto err;
+	return true;
+}
+
 static int build_tree(mode_t mtpt_mode) {
 	struct archive * archive;
 	struct stat st;
@@ -360,31 +375,8 @@ static int build_tree(mode_t mtpt_mode) {
 		lerrnum(ENOMEM);
 		return -ENOMEM;
 	}
-	if(archive_read_support_filter_all(archive) != ARCHIVE_OK) {
-		fprintf(stderr, "%s\n", archive_error_string(archive));
+	if(!archive_prepopen(archive))
 		return archive_errno(archive);
-	}
-	if(options.formatraw) {
-		if(archive_read_support_format_raw(archive) != ARCHIVE_OK) {
-			fprintf(stderr, "%s\n", archive_error_string(archive));
-			return archive_errno(archive);
-		}
-	} else {
-		if(archive_read_support_format_all(archive) != ARCHIVE_OK) {
-			fprintf(stderr, "%s\n", archive_error_string(archive));
-			return archive_errno(archive);
-		}
-	}
-	if(options.password) {
-		if(archive_read_add_passphrase(archive, user_passphrase) != ARCHIVE_OK) {
-			fprintf(stderr, "%s\n", archive_error_string(archive));
-			return archive_errno(archive);
-		}
-	}
-	if(archive_read_open_fd(archive, archiveFd, BLOCK_SIZE) != ARCHIVE_OK) {
-		fprintf(stderr, "%s\n", archive_error_string(archive));
-		return archive_errno(archive);
-	}
 	/* check if format or compression prohibits writability */
 	format = archive_format(archive);
 	log("mounted archive format is %s (0x%x)", archive_format_name(archive), format);
@@ -751,24 +743,8 @@ static int save(const char * archiveFile) {
 		lerrnum(ENOMEM);
 		return -ENOMEM;
 	}
-	if(archive_read_support_filter_all(oldarc) != ARCHIVE_OK) {
-		lerr("%s", archive_error_string(oldarc));
+	if(!archive_prepopen(oldarc))
 		return archive_errno(oldarc);
-	}
-	if(archive_read_support_format_all(oldarc) != ARCHIVE_OK) {
-		lerr("%s", archive_error_string(oldarc));
-		return archive_errno(oldarc);
-	}
-	if(options.password) {
-		if(archive_read_add_passphrase(oldarc, user_passphrase) != ARCHIVE_OK) {
-			lerr("%s", archive_error_string(oldarc));
-			return archive_errno(oldarc);
-		}
-	}
-	if(archive_read_open_fd(oldarc, archiveFd, BLOCK_SIZE) != ARCHIVE_OK) {
-		lerr("%s", archive_error_string(oldarc));
-		return archive_errno(oldarc);
-	}
 	/* Read first header of oldarc so that archive format is set. */
 	if(archive_read_next_header(oldarc, &entry) != ARCHIVE_OK) {
 		lerr("%s", archive_error_string(oldarc));
@@ -923,28 +899,8 @@ static int _ar_open_raw(void)
 		log("Out of memory");
 		return -ENOMEM;
 	}
-	archive_ret = archive_read_support_filter_all(rawcache.archive);
-	if(archive_ret != ARCHIVE_OK) {
-		log("archive_read_support_filter_all(): %s (%d)\n", archive_error_string(rawcache.archive), archive_ret);
+	if(!archive_prepopen(rawcache.archive))
 		return -EIO;
-	}
-	archive_ret = archive_read_support_format_raw(rawcache.archive);
-	if(archive_ret != ARCHIVE_OK) {
-		log("archive_read_support_format_raw(): %s (%d)\n", archive_error_string(rawcache.archive), archive_ret);
-		return -EIO;
-	}
-	if(options.password) {
-		if(archive_read_add_passphrase(rawcache.archive, user_passphrase) != ARCHIVE_OK) {
-			fprintf(stderr, "%s\n", archive_error_string(rawcache.archive));
-			return archive_errno(rawcache.archive);
-		}
-	}
-
-	archive_ret = archive_read_open_fd(rawcache.archive, archiveFd, BLOCK_SIZE);
-	if(archive_ret != ARCHIVE_OK) {
-		log("archive_read_open_fd(): %s (%d)\n", archive_error_string(rawcache.archive), archive_ret);
-		return -EIO;
-	}
 	/* search for file to read - "/data" must be the first entry */
 	while((archive_ret = archive_read_next_header(rawcache.archive, &entry)) == ARCHIVE_OK) {
 		const char * name;
@@ -1074,27 +1030,8 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 			return -ENOMEM;
 		}
 
-		archive_ret = archive_read_support_filter_all(archive);
-		if(archive_ret != ARCHIVE_OK) {
-			log("archive_read_support_filter_all(): %s (%d)\n", archive_error_string(archive), archive_ret);
+		if(!archive_prepopen(archive))
 			return -EIO;
-		}
-		archive_ret = archive_read_support_format_all(archive);
-		if(archive_ret != ARCHIVE_OK) {
-			log("archive_read_support_format_all(): %s (%d)\n", archive_error_string(archive), archive_ret);
-			return -EIO;
-		}
-		if(options.password) {
-			if(archive_read_add_passphrase(archive, user_passphrase) != ARCHIVE_OK) {
-				fprintf(stderr, "%s\n", archive_error_string(archive));
-				return archive_errno(archive);
-			}
-		}
-		archive_ret = archive_read_open_fd(archive, archiveFd, BLOCK_SIZE);
-		if(archive_ret != ARCHIVE_OK) {
-			log("archive_read_open_fd(): %s (%d)\n", archive_error_string(archive), archive_ret);
-			return -EIO;
-		}
 
 		last_open_node.offset_in_archive_file = -1;
 
@@ -1188,33 +1125,8 @@ static off_t _ar_getsizeraw(const char * path) {
 		return -ENOMEM;
 	}
 
-	archive_ret = archive_read_support_filter_all(archive);
-
-	if(archive_ret != ARCHIVE_OK) {
-		log("archive_read_support_filter_all(): %s (%d)\n", archive_error_string(archive), archive_ret);
+	if(!archive_prepopen(archive))
 		return -EIO;
-	}
-
-	if(options.formatraw) {
-		archive_ret = archive_read_support_format_raw(archive);
-		if(archive_ret != ARCHIVE_OK) {
-			log("archive_read_support_format_raw(): %s (%d)\n", archive_error_string(archive), archive_ret);
-			return -EIO;
-		}
-	}
-
-	if(options.password) {
-		if(archive_read_add_passphrase(archive, user_passphrase) != ARCHIVE_OK) {
-			fprintf(stderr, "%s\n", archive_error_string(archive));
-			return archive_errno(archive);
-		}
-	}
-
-	archive_ret = archive_read_open_fd(archive, archiveFd, BLOCK_SIZE);
-	if(archive_ret != ARCHIVE_OK) {
-		log("archive_read_open_fd(): %s (%d)\n", archive_error_string(archive), archive_ret);
-		return -EIO;
-	}
 
 	/* search for file to read */
 	while((archive_ret = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
