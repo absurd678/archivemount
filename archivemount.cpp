@@ -88,7 +88,7 @@ typedef struct node {
 static struct {
 	NODE * node;
 	struct archive * archive;
-	off_t offset_in_archive_file; // -1 = not found; -2 = poison
+	off_t offset_in_archive_file; // -1 = not yet found; -2 = poison
 } last_open_node;
 
 
@@ -102,10 +102,7 @@ struct options {
 };
 
 typedef struct formatraw_cache {
-	struct stat st;
-	struct archive * archive;
-	int opened;
-	off_t offset_uncompressed;
+	off_t st_size;
 } FORMATRAW_CACHE;
 
 enum {
@@ -874,112 +871,100 @@ static int save(const char * archiveFile) {
 /* API functions */
 /*****************/
 
-static int _ar_open_raw(void)
+static void _ar_open_raw(void)
 //_ar_open_raw(const char *path, struct fuse_file_info *fi)
 {
 	// open archive and search first entry
 
-	int ret = -1;
-	const char * realpath;
 	NODE * node = firstchild(root);
 	log("_ar_open_raw called, path: '%s'", node->name);
 
+	last_open_node.node = node;
 
-	if(rawcache.opened != 0) {
-		log("already opened");
-		return 0;
+	if(last_open_node.archive) {
+		archive_read_free(last_open_node.archive);
+		lseek(archiveFd, 0, SEEK_SET);
 	}
 
 	//	struct archive *archive;
-	struct archive_entry * entry;
 	int archive_ret;
 	/* search file in archive */
-	realpath = archive_entry_pathname(node->entry);
-	if((rawcache.archive = archive_read_new()) == NULL) {
-		log("Out of memory");
-		return -ENOMEM;
+	if((last_open_node.archive = archive_read_new()) == NULL) {
+		lerrnum(ENOMEM);
+		return;
 	}
-	if(!archive_prepopen(rawcache.archive))
-		return -EIO;
+	last_open_node.offset_in_archive_file = -2;
+	if(!archive_prepopen(last_open_node.archive))
+		return;
+
+	struct archive_entry * entry;
+	const char * realpath = archive_entry_pathname(node->entry);
 	/* search for file to read - "/data" must be the first entry */
-	while((archive_ret = archive_read_next_header(rawcache.archive, &entry)) == ARCHIVE_OK) {
-		const char * name;
-		name = archive_entry_pathname(entry);
-		if(strcmp(realpath, name) == 0) {
+	while((archive_ret = archive_read_next_header(last_open_node.archive, &entry)) == ARCHIVE_OK)
+		if(strcmp(realpath, archive_entry_pathname(entry)) == 0)
+			break;
+
+	last_open_node.offset_in_archive_file = 0;
+}
+
+static int _ar_read_archive_found_common(char * buf, size_t size, off_t offset) {
+	auto & archive = last_open_node.archive;
+	int ret;
+
+	// we know last_open_node.offset_in_archive_file < offset (otherwise we reopened)
+	offset -= last_open_node.offset_in_archive_file;
+
+	while(offset > 0) {
+		int skip = offset > (off_t)sizeof(temp_io_buf) ? (off_t)sizeof(temp_io_buf) : offset;
+		ret      = archive_read_data(archive, temp_io_buf, skip);
+		if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
+			log("ar_read (skipping offset): %s", archive_error_string(archive));
+			errno = archive_errno(archive);
+			ret   = -1;
 			break;
 		}
+		offset -= skip;
+		last_open_node.offset_in_archive_file += skip;
 	}
-	rawcache.opened              = 1;
-	rawcache.offset_uncompressed = 0;
+	if(offset)
+		goto err;
+
+	/* read data */
+	ret = archive_read_data(archive, buf, size);
+	if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
+	err:
+		log("ar_read (reading data): %s", archive_error_string(archive));
+		errno                                 = archive_errno(archive);
+		last_open_node.offset_in_archive_file = -2;
+		ret                                   = -1;
+	} else
+		last_open_node.offset_in_archive_file += ret;
 
 	return ret;
 }
 
-static int _ar_read_raw(const char * path, char * buf, size_t size, off_t offset, struct fuse_file_info * fi) {
-	int ret = -1;
-	NODE * node;
-	(void)fi;
-
+static int _ar_read_raw(const char * path, char * buf, size_t size, off_t offset, struct fuse_file_info *) {
 	log("_ar_read_raw called, path: '%s'", path);
 	/* find node */
-	node = get_node_for_path(root, path);
+	NODE * node = get_node_for_path(root, path);
 	if(!node) {
 		return -ENOENT;
 	}
 
-	if(offset < rawcache.offset_uncompressed) {
-		// rewind archive
-
-		/* close archive */
-		archive_read_free(rawcache.archive);
-		lseek(archiveFd, 0, SEEK_SET);
-
-		rawcache.opened = 0;
-
-		/* reopen */
+	if(last_open_node.node == node && last_open_node.offset_in_archive_file <= offset && last_open_node.offset_in_archive_file != -2)
+		;
+	else
 		_ar_open_raw();
-	}
 
-	/* skip offset */
-	offset -= rawcache.offset_uncompressed;
-
-	while(offset > 0) {
-		int skip = offset > (off_t)sizeof(temp_io_buf) ? (off_t)sizeof(temp_io_buf) : offset;
-		ret      = archive_read_data(rawcache.archive, temp_io_buf, skip);
-		if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
-			log("ar_read_raw (skipping offset): %s", archive_error_string(rawcache.archive));
-			errno = archive_errno(rawcache.archive);
-			ret   = -1;
-			break;
-		}
-		rawcache.offset_uncompressed += skip;
-		offset -= skip;
-	}
-
-	if(offset) {
-		/* there was an error */
-		log("ar_read_raw (offset!=0)");
-		return -EIO;
-	}
-	/* read data */
-	ret = archive_read_data(rawcache.archive, buf, size);
-	if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
-		log("ar_read_raw (reading data): %s", archive_error_string(rawcache.archive));
-		errno = archive_errno(rawcache.archive);
-		ret   = -1;
-	}
-	rawcache.offset_uncompressed += size;
-	return ret;
+	return _ar_read_archive_found_common(buf, size, offset);
 }
 
 static int _ar_read(const char * path, char * buf, size_t size, off_t offset, struct fuse_file_info * fi) {
 	int ret = -1;
 	const char * realpath;
-	NODE * node;
-	(void)fi;
 	log("_ar_read called, path: '%s'", path);
 	/* find node */
-	node = get_node_for_path(root, path);
+	NODE * node = get_node_for_path(root, path);
 	if(!node) {
 		return -ENOENT;
 	}
@@ -1052,35 +1037,7 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 			}
 		}
 
-		// we know last_open_node.offset_in_archive_file < offset (otherwise we reopened)
-		offset -= last_open_node.offset_in_archive_file;
-
-		/* skip offset */
-		while(offset > 0) {
-			int skip = offset > (off_t)sizeof(temp_io_buf) ? (off_t)sizeof(temp_io_buf) : offset;
-			ret      = archive_read_data(archive, temp_io_buf, skip);
-			if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
-				log("ar_read (skipping offset): %s", archive_error_string(archive));
-				errno = archive_errno(archive);
-				ret   = -1;
-				break;
-			}
-			offset -= skip;
-			last_open_node.offset_in_archive_file += skip;
-		}
-		if(offset)
-			goto err;
-
-		/* read data */
-		ret = archive_read_data(archive, buf, size);
-		if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
-		err:
-			log("ar_read (reading data): %s", archive_error_string(archive));
-			errno                                 = archive_errno(archive);
-			last_open_node.offset_in_archive_file = -2;
-			ret                                   = -1;
-		} else
-			last_open_node.offset_in_archive_file += ret;
+		return _ar_read_archive_found_common(buf, size, offset);
 	}
 	return ret;
 }
@@ -1171,7 +1128,7 @@ static int _ar_getattr(const char * path, struct stat * stbuf) {
 	}
 	if(options.formatraw && node->children.empty()) {
 		fstat(archiveFd, stbuf);
-		size = rawcache.st.st_size;
+		size = rawcache.st_size;
 		if(size < 0)
 			return -1;
 		stbuf->st_size = size;
@@ -2295,8 +2252,8 @@ int main(int argc, char ** argv) {
 	}
 	if(options.formatraw) {
 		/* create rawcache */
-		rawcache.st.st_size = _ar_getsizeraw(firstchild(root)->name);
-		// log("cache st_size = %ld",rawcache.st.st_size);
+		rawcache.st_size = _ar_getsizeraw(firstchild(root)->name);
+		// log("cache st_size = %ld",rawcache.st_size);
 	}
 
 	/* save directory this was started from */
