@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: 0BSD
+image: freebsd/latest
+packages:
+  - gmake
+  - pkgconf
+  - fusefs-libs
+tasks:
+  - build: |
+      gmake -C archivemount-ng all #check
+  - install: |
+      sudo gmake -C archivemount-ng install
+  #- smoketest: |
+  #    archivemount archivemount-ng/text

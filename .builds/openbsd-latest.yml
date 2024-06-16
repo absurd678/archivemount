@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: 0BSD
+image: openbsd/latest
+packages:
+  - gmake
+  - libarchive
+tasks:
+  - build: |
+      gmake -C archivemount-ng all #check
+  - install: |
+      doas gmake -C archivemount-ng install
+  #- smoketest: |
+  #    archivemount archivemount-ng/text
