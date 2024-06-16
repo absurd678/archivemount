@@ -21,7 +21,7 @@ Debian bugs:
   [0.8.9] #799563:  Failed to list correctly the files when parent directory name and child directory names are the same
   [lllll] #687710:  cannot read ISO-9660 archives
   [xxxxx] #832823:  new upstream version (0.8.7)
-  [     ] #838597:  Unmount instructions in man page lead to "Permission denied" error.
+  [  1  ] #838597:  Unmount instructions in man page lead to "Permission denied" error.
   [xxxxx] #891749:  New upstream version (0.8.9)
   [xxxxx] #974679:  Wrong homepage + new version
   [0.8.4] #651442:  does not handle compressed (single) files
@@ -74,3 +74,11 @@ formats for reading than it does for writing. Archivemount tries to do a
 sensible conversion here when writing the changed archive because I think most
 people do not care a lot about the exact version of tar used inside the .tgz
 file as long as their favourite archive tool can still cope with the file.
+
+Release signing
+---------------
+Release tarballs are signed with nabijaczleweli@nabijaczleweli.xyz
+  (pull with WKD, but 7D69 474E 8402 8C5C C0C4  4163 BCFD 0B01 8D26 58F1).
+аnd stored in git notes as-if via the example program provided at
+  https://man.sr.ht/git.sr.ht/#signing-tagsx27-tarballs
+and are thus available on the refs listing/tag page as .tar.gz.asc.
