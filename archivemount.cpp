@@ -610,23 +610,43 @@ static int rename_recursively(NODE * under, const char * from, const char * to) 
 	return ret;
 }
 
-static int get_temp_file_name(char ** location) {
-	static const char * tmpdir;
-	if(!tmpdir)
-		tmpdir = getenv("TMPDIR") ?: P_tmpdir;
-
-	int fh;
-
+static const char * const tmpdir = getenv("TMPDIR") ?: P_tmpdir;
+static int get_temp_file(char ** location, mode_t mode, bool directory) {
+	int fh{};
 	/* create name for temp file */
-	if(asprintf(location, "%s/archivemount_XXXXXX", tmpdir) == -1)
+	if(asprintf(location, "%s/archivemount.XXXXXXXXXX", tmpdir) == -1)
 		return -errno;
-	if((fh = mkstemp(*location)) == -1) {
+	if(directory) {
+		if(!mkdtemp(*location))
+			goto err;
+	} else {
+		if((fh = mkstemp(*location)) == -1) {
+		err:
+			lerr("%s: %s", *location, strerror(errno));
+			free(*location);
+			*location = NULL;
+			return -errno;
+		}
+	}
+	if(mode != (mode_t)-1 && chmod(*location, mode) == -1)
+		goto err;
+	return fh;
+}
+static char * tmpdir_for_nodes;
+static uint64_t tmpdir_for_nodes_children;
+static int get_temp_node(char ** location, mode_t mode, dev_t dev) {
+	if(!tmpdir_for_nodes)
+		if(int err = get_temp_file(&tmpdir_for_nodes, (mode_t)-1, true))
+			return err;
+
+	if(asprintf(location, "%s/%" PRIu64 "", tmpdir_for_nodes, tmpdir_for_nodes_children++) == -1)
+		return -errno;
+	if(mknod(*location, mode, dev) == -1) {
 		lerr("%s: %s", *location, strerror(errno));
 		free(*location);
+		*location = NULL;
 		return -errno;
 	}
-	close(fh);
-	unlink(*location);
 	return 0;
 }
 
@@ -647,8 +667,7 @@ static int update_entry_stat(NODE * node) {
 	archive_entry_set_mtime(node->entry, st.st_mtime, 0);
 	archive_entry_set_size(node->entry, st.st_size);
 	archive_entry_set_mode(node->entry, st.st_mode);
-	archive_entry_set_rdevmajor(node->entry, st.st_dev);
-	archive_entry_set_rdevminor(node->entry, st.st_dev);
+	archive_entry_set_rdev(node->entry, st.st_rdev);
 	pwd = getpwuid(st.st_uid);
 	if(pwd)
 		archive_entry_set_uname(node->entry, pwd->pw_name);
@@ -665,7 +684,7 @@ thread_local char temp_io_buf[64 * 1024];
 static void write_new_modded_file(NODE * node, struct archive_entry * wentry, struct archive * newarc) {
 	if(node->location) {
 		struct stat st;
-		int fh       = 0;
+		int fh       = -1;
 		off_t offset = 0;
 		ssize_t len  = 0;
 		/* copy stat info */
@@ -674,34 +693,25 @@ static void write_new_modded_file(NODE * node, struct archive_entry * wentry, st
 			return;
 		}
 		archive_entry_copy_stat(wentry, &st);
-		/* open temporary file */
-		fh = open(node->location, O_RDONLY | O_CLOEXEC);
-		if(fh == -1) {
-			lerr("Fatal error opening modified file %s at location %s, giving up", node->name, node->location);
-			return;
-		}
 		/* write header */
 		archive_write_header(newarc, wentry);
 		if(S_ISREG(st.st_mode)) {
+			/* open temporary file */
+			fh = open(node->location, O_RDONLY | O_CLOEXEC);
+			if(fh == -1) {
+				lerr("Fatal error opening modified file %s at location %s, giving up", node->name, node->location);
+				return;
+			}
 			/* regular file, copy data */
 			while((len = pread(fh, temp_io_buf, sizeof(temp_io_buf), offset)) > 0) {
 				archive_write_data(newarc, temp_io_buf, len);
 				offset += len;
 			}
+			close(fh);
 		}
 		if(len == -1) {
 			lerr("Error reading temporary file %s for file %s: %s", node->location, node->name, strerror(errno));
-			close(fh);
 			return;
-		}
-		/* clean up */
-		close(fh);
-		if(S_ISDIR(st.st_mode)) {
-			if(rmdir(node->location) == -1)
-				lerr("WARNING: rmdir '%s' failed: %s", node->location, strerror(errno));
-		} else {
-			if(unlink(node->location) == -1)
-				lerr("WARNING: unlinking '%s' failed: %s", node->location, strerror(errno));
 		}
 	} else {
 		/* no data, only write header (e.g. when node is a link!) */
@@ -873,6 +883,24 @@ static int save(const char * archiveFile) {
 		}
 	}
 	return 0;
+}
+
+// Kill temporary files
+static void nosave(NODE * node = root) {
+	if(node->location) {
+		auto st = archive_entry_stat(node->entry);
+		if(S_ISDIR(st->st_mode)) {
+			if(rmdir(node->location) == -1)
+				lerr("WARNING: rmdir '%s' failed: %s", node->location, strerror(errno));
+		} else {
+			if(unlink(node->location) == -1)
+				lerr("WARNING: unlinking '%s' failed: %s", node->location, strerror(errno));
+			if(tmpdir_for_nodes && !S_ISREG(st->st_mode))
+				rmdir(tmpdir_for_nodes);
+		}
+	}
+	for(auto && [_, child] : node->children)
+		nosave(child);
 }
 
 
@@ -1206,17 +1234,10 @@ static int ar_mkdir(const char * path, mode_t mode) {
 		pthread_mutex_unlock(&lock);
 		return -EEXIST;
 	}
-	/* create name for temp dir */
-	if((tmp = get_temp_file_name(&location)) < 0) {
+	/* create temp dir */
+	if((tmp = get_temp_file(&location, mode, true)) < 0) {
 		pthread_mutex_unlock(&lock);
 		return tmp;
-	}
-	/* create temp dir */
-	if(mkdir(location, mode) == -1) {
-		log("Could not create temporary dir %s: %s", location, strerror(errno));
-		free(location);
-		pthread_mutex_unlock(&lock);
-		return -errno;
 	}
 	/* build node */
 	if((node = init_node()) == NULL) {
@@ -1479,13 +1500,8 @@ static int realise_archived_file(const char * path, char ** location, struct fus
 	char * tmpbuf   = NULL;
 	off_t tmpoffset = 0;
 	int tmp, fh;
-	if((tmp = get_temp_file_name(location)) < 0)
-		return tmp;
-	if((fh = open(*location, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600)) == -1) {
-		log("error opening temp file %s: %s", *location, strerror(errno));
-		unlink(*location);
-		return -errno;
-	}
+	if((fh = get_temp_file(location, (mode_t)-1, false)) < 0)
+		return fh;
 
 	/* copy original file to temporary file */
 	if((tmpbuf = (char *)malloc(64 * 1024)) == NULL) {
@@ -1683,16 +1699,9 @@ static int ar_mknod(const char * path, mode_t mode, dev_t rdev) {
 		return -EEXIST;
 	}
 	/* create name for temp file */
-	if((tmp = get_temp_file_name(&location)) < 0) {
+	if((tmp = get_temp_node(&location, mode, rdev)) < 0) {
 		pthread_mutex_unlock(&lock);
 		return tmp;
-	}
-	/* create temp file */
-	if(mknod(location, mode, rdev) == -1) {
-		log("Could not create temporary file %s: %s", location, strerror(errno));
-		free(location);
-		pthread_mutex_unlock(&lock);
-		return -errno;
 	}
 	/* build node */
 	if((node = init_node()) == NULL) {
@@ -2138,17 +2147,10 @@ static int ar_create(const char * path, mode_t mode, struct fuse_file_info * fi)
 		pthread_mutex_unlock(&lock);
 		return -EEXIST;
 	}
-	/* create name for temp file */
-	if((tmp = get_temp_file_name(&location)) < 0) {
+	/* create temp file */
+	if((tmp = get_temp_file(&location, mode, false)) < 0) {
 		pthread_mutex_unlock(&lock);
 		return tmp;
-	}
-	/* create temp file */
-	if(creat(location, mode) == -1) {
-		log("Could not create temporary file %s: %s", location, strerror(errno));
-		free(location);
-		pthread_mutex_unlock(&lock);
-		return -errno;
 	}
 	/* build node */
 	if((node = init_node()) == NULL) {
@@ -2305,16 +2307,14 @@ int main(int argc, char ** argv) {
 	fuse_main(args.argc, args.argv, &ar_oper, NULL);
 
 	/* save changes if modified; must be in original directory (libarchive can chdir) */
-	if(archiveWriteable && !options.readonly && archiveModified && !options.nosave) {
-		int err;
-		if(fchdir(oldwd)) {
-			fprintf(stderr, "fchdir() to old path failed, can't save new archive\n");
-		} else if((err = save(archiveFile))) {
-			fprintf(stderr, "Saving new archive failed: %s\n", strerror(-err));
+	if(archiveModified) {
+		if(!options.nosave) {
+			if(fchdir(oldwd))
+				fprintf(stderr, "fchdir() to old path failed, can't save new archive\n");
+			else if(int err = save(archiveFile); err)
+				fprintf(stderr, "Saving new archive failed: %s\n", strerror(-err));
 		}
+
+		nosave();
 	}
 }
-
-/*
-vim:ts=8:softtabstop=8:sw=8:noexpandtab
-*/
