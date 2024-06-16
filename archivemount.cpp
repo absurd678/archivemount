@@ -315,7 +315,7 @@ static int insert_by_path(NODE * root, NODE * node) {
 	return 0;
 }
 
-static int build_tree(const char * mtpt) {
+static int build_tree(mode_t mtpt_mode) {
 	struct archive * archive;
 	struct stat st;
 	int format;
@@ -400,8 +400,7 @@ static int build_tree(const char * mtpt) {
 	archive_entry_set_mtime(root->entry, st.st_mtim.tv_sec, st.st_mtim.tv_nsec);
 	archive_entry_set_pathname(root->entry, "/");
 	archive_entry_set_size(root->entry, st.st_size);
-	stat(mtpt, &st);
-	archive_entry_set_mode(root->entry, st.st_mode);
+	archive_entry_set_mode(root->entry, mtpt_mode);
 
 	if((cur = init_node()) == NULL) {
 		return -ENOMEM;
@@ -2315,7 +2314,10 @@ int main(int argc, char ** argv) {
 		lerr("%s: %s", mtpt, strerror(errno));
 		return(1);
 	}
-	if(!S_ISDIR(st.st_mode)) {
+	// https://github.com/libfuse/libfuse/commit/64e11073b9347fcf9c6d1eea143763ba9e946f70
+	if(!strncmp(mtpt, "/dev/fd/", sizeof("/dev/fd/") - 1))
+		st.st_mode = (st.st_mode & ~S_IFMT) | S_IFDIR;
+	else if(!S_ISDIR(st.st_mode)) {
 		lerr("%s: %s", mtpt, strerror(ENOTDIR));
 		return(1);
 	}
@@ -2353,7 +2355,7 @@ int main(int argc, char ** argv) {
 		lerr("%s: %s", archiveFile, strerror(errno));
 		return 1;
 	}
-	if(build_tree(mtpt) != 0) {
+	if(build_tree(st.st_mode) != 0) {
 		return(1);
 	}
 	if(options.formatraw) {
