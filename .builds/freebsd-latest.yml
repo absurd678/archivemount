@@ -8,6 +8,7 @@ tasks:
   - fuse: |
       sudo kldload fusefs
   - build: |
-      gmake -C archivemount-ng all check
+      gmake -C archivemount-ng all
+      sudo gmake -C archivemount-ng check
   - install: |
       sudo gmake -C archivemount-ng install
