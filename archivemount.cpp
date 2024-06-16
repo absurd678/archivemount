@@ -36,6 +36,7 @@
 #endif
 #include <fuse_opt.h>
 #include <grp.h>
+#include <limits>
 #include <map>
 #include <new>
 #include <pthread.h>
@@ -73,6 +74,7 @@ typedef struct node {
 	std::string_view basename;                   /* every after the last '/'; substring of name */
 	char * location;                             /* location on disk for new/modified files, else NULL */
 	struct archive_entry * entry;                /* libarchive header data */
+	off_t entry_size_in_archive;                 /* for st_blocks */
 	std::map<std::string_view, node *> children; /* basename -> node */
 	bool namechanged;                            /* true when file was renamed */
 	bool modified;                               /* true when node was modified */
@@ -131,6 +133,7 @@ static struct options options;
 static const char * mtpt;
 static const char * archiveFile;
 static char * user_passphrase;
+static uint64_t archiveFileSize;
 static pthread_mutex_t lock; /* global node tree lock */
 
 
@@ -153,12 +156,11 @@ static void usage(const char * progname) {
 	        "			    or use a format for saving which is\n"
 	        "			    not supported by archivemount.\n"
 	        "\n"
-	        "    -o subtree=regexp       use only subtree matching ^\\.\\?<regexp> from archive\n"
+	        "    -o subtree=regexp       use only subtree matching ^\\.\\?regexp from archive\n"
 	        "			    it implies readonly\n"
 	        "\n"
 	        "    -o formatraw	    treat input as a single element archive\n"
-	        "			    it implies readonly\n"
-	        "\n",
+	        "			    it implies readonly\n",
 	        progname);
 }
 
@@ -182,19 +184,16 @@ static int ar_opt_proc(void *, const char * arg, int key, struct fuse_args * out
 
 		case KEY_HELP:
 			usage(outargs->argv[0]);
-			fuse_opt_add_arg(outargs, "-ho");
-			fuse_main(outargs->argc, outargs->argv, &faux_oper, NULL);
-			exit(1);
+			exit(0);
 
 		case KEY_VERSION:
-			puts("archivemount version " VERSION);
+			fprintf(stdout, "archivemount version " VERSION "\n%s (header " ARCHIVE_VERSION_ONLY_STRING ")\n", archive_version_details());
 			fuse_opt_add_arg(outargs, "--version");
 			fuse_main(outargs->argc, outargs->argv, &faux_oper, NULL);
 			exit(0);
 
 		default:
-			fprintf(stderr, "internal error\n");
-			abort();
+			__builtin_unreachable();
 	}
 }
 
@@ -321,6 +320,17 @@ static bool archive_prepopen(struct archive * archive) {
 	return true;
 }
 
+static uint64_t total_entry_size_in_archive(NODE * node = root) {
+	uint64_t ret = node->entry_size_in_archive;
+	for(auto && [_, child] : node->children)
+		ret += total_entry_size_in_archive(child);
+	return ret;
+}
+static void redistribute_entry_size_in_archive(double scale, NODE * node = root) {
+	node->entry_size_in_archive = node->entry_size_in_archive * scale;
+	for(auto && [_, child] : node->children)
+		redistribute_entry_size_in_archive(scale, child);
+}
 static int build_tree(mode_t mtpt_mode) {
 	struct archive * archive;
 	struct stat st;
@@ -351,6 +361,7 @@ static int build_tree(mode_t mtpt_mode) {
 			free(eb);
 			return -EINVAL;
 		}
+		free(subtree_filter);
 		options.readonly = 1;
 	}
 	/* open archive */
@@ -390,11 +401,16 @@ static int build_tree(mode_t mtpt_mode) {
 	}
 
 	/* read all entries in archive, create node for each */
+	off_t pos = archive_read_header_position(archive), *lastpos{};
 	while(archive_read_next_header2(archive, cur->entry) == ARCHIVE_OK) {
-		const char * name;
-		/* find name of node */
-		name = archive_entry_pathname(cur->entry);
-		if(memcmp(name, "./", 3) == 0) {
+		off_t curpos = archive_read_header_position(archive);
+		if(lastpos)
+			*lastpos = curpos - pos;
+		lastpos = &cur->entry_size_in_archive;
+		pos = curpos;
+
+		const char * name = archive_entry_pathname(cur->entry);
+		if(memcmp(name, "./", sizeof("./")) == 0) {
 			/* special case: the directory "./" must be skipped! */
 			continue;
 		}
@@ -412,16 +428,18 @@ static int build_tree(mode_t mtpt_mode) {
 			cur->name = strdup(name + 1);
 		} else if(name[0] != '/') {
 			/* prepend a '/' to name */
-			if(asprintf(&cur->name, "/%s", name) == -1) {
-				lerrno();
-				return -errno;
-			};
+			if(asprintf(&cur->name, "/%s", name) == -1)
+				cur->name = NULL;
 		} else {
 			/* just set the name */
 			cur->name = strdup(name);
 		}
-		int len = strlen(cur->name) - 1;
-		if(0 < len) {
+		if(!cur->name) {
+			lerrno();
+			return -errno;
+		}
+		auto len = strlen(cur->name) - 1;
+		if(len > 0) {
 			/* remove trailing '/' for directories */
 			if(cur->name[len] == '/') {
 				cur->name[len] = '\0';
@@ -445,16 +463,24 @@ static int build_tree(mode_t mtpt_mode) {
 
 		archive_read_data_skip(archive);
 	}
+	off_t curpos = archive_read_header_position(archive);
+	if(lastpos)
+		*lastpos = curpos - pos;
 	/* free the last unused NODE */
 	free_node(cur);
+
+	archiveFileSize = archive_filter_bytes(archive, -1);
+	// Right now entry_size_in_archive is /uncompressed/: this is what archive_read_header_position() returns
+	// Accounting by archive_filter_bytes(_, -1) would yield 1234000, 0, 0, 0, 0, 1234000, 0, 0, 0, 0
+	// Redistribute proportionally. Not perfect
+	auto total = total_entry_size_in_archive();
+	redistribute_entry_size_in_archive((double)archiveFileSize / (double)total);
 
 	/* close archive */
 	archive_read_free(archive);
 	lseek(archiveFd, 0, SEEK_SET);
-	if(options.subtree_filter) {
+	if(options.subtree_filter)
 		regfree(&subtree);
-		free(subtree_filter);
-	}
 	return 0;
 }
 
@@ -1119,12 +1145,12 @@ static int _ar_getattr(const char * path, struct stat * stbuf) {
 			return -1;
 		stbuf->st_size = size;
 	} else {
-		memcpy(stbuf, archive_entry_stat(node->entry), sizeof(struct stat));
+		*stbuf = *archive_entry_stat(node->entry);
 		if(options.formatraw && !node->children.empty())
 			stbuf->st_size = 4096;
 	}
-	stbuf->st_blocks  = (stbuf->st_size + 511) / 512;
-	stbuf->st_blksize = 4096;
+	stbuf->st_blocks  = (node->entry_size_in_archive + 511) / 512;
+	stbuf->st_blksize = sizeof(temp_io_buf);
 	/* when sharing via Samba nlinks have to be at
 	   least 2 for directories or directories will
 	   be shown as files, and 1 for files or they
@@ -1140,7 +1166,7 @@ static int _ar_getattr(const char * path, struct stat * stbuf) {
 	}
 
 	if(options.readonly) {
-		stbuf->st_mode = stbuf->st_mode & 0777555;
+		stbuf->st_mode &= ~0222;
 	}
 
 	return 0;
@@ -1314,7 +1340,7 @@ static int ar_symlink(const char * from, const char * to) {
 	st.st_gid     = getgid();
 	st.st_rdev    = 0;
 	st.st_size    = strlen(from);
-	st.st_blksize = 4096;
+	st.st_blksize = sizeof(temp_io_buf);
 	st.st_blocks  = 0;
 	st.st_atime = st.st_ctime = st.st_mtime = time(NULL);
 	/* build entry */
@@ -1865,21 +1891,21 @@ static int ar_utimens(const char * path, const struct timespec tv[2]
 	return ret;
 }
 
-static int ar_statfs(const char * path, struct statvfs * stbuf) {
-	(void)path;
-	log("ar_statfs called, %s", path);
+static size_t count_nodes(NODE * node = root) {
+	size_t ret = 1;
+	for(auto && [_, child] : node->children)
+		ret += count_nodes(child);
+	return ret;
+}
+static int ar_statfs(const char *, struct statvfs * stbuf) {
+	log("ar_statfs called");
 
-	/* Adapted the following from sshfs.c */
+	stbuf->f_namemax = 255;  // seems to be enforced by fuse; matches Linux
 
-	stbuf->f_namemax = 255;
-	stbuf->f_bsize   = 4096;
-	/*
-	 * df seems to use f_bsize instead of f_frsize, so make them
-	 * the same
-	 */
-	stbuf->f_frsize = stbuf->f_bsize;
-	stbuf->f_blocks = stbuf->f_bfree = stbuf->f_bavail = 1000ULL * 1024 * 1024 * 1024 / stbuf->f_frsize;
-	stbuf->f_files = stbuf->f_ffree = 1000000000;
+	stbuf->f_frsize = stbuf->f_bsize = BLOCK_SIZE;
+	stbuf->f_blocks = (archiveFileSize + (BLOCK_SIZE - 1)) / BLOCK_SIZE;
+
+	stbuf->f_files = count_nodes();
 	return 0;
 }
 
@@ -2058,7 +2084,10 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 	);
 
 	for(auto && [_, child] : node->children) {
-		const struct stat * st;
+		/* Make a copy so we can set blocks/blksize. These are not
+		 * set by libarchive. https://github.com/libarchive/libarchive/issues/302 */
+		struct stat st;
+		off_t entry_size_in_archive;
 		if(archive_entry_hardlink(child->entry)) {
 			/* file is a hardlink, stat'ing it somehow does not
 			 * work; stat the original instead */
@@ -2067,17 +2096,16 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 				pthread_mutex_unlock(&lock);
 				return -ENOENT;
 			}
-			st = archive_entry_stat(orig->entry);
+			st = *archive_entry_stat(orig->entry);
+			entry_size_in_archive = orig->entry_size_in_archive;
 		} else {
-			st = archive_entry_stat(child->entry);
+			st = *archive_entry_stat(child->entry);
+			entry_size_in_archive = child->entry_size_in_archive;
 		}
-		/* Make a copy so we can set blocks/blksize. These are not
-		 * set by libarchive. https://github.com/libarchive/libarchive/issues/302 */
-		struct stat st_copy = *st;
-		st_copy.st_blocks   = (st_copy.st_size + 511) / 512;
-		st_copy.st_blksize  = 4096;
+		st.st_blocks   = (entry_size_in_archive + 511) / 512;
+		st.st_blksize  = sizeof(temp_io_buf);
 
-		if(filler(buf, child->basename.data(), &st_copy, 0
+		if(filler(buf, child->basename.data(), &st, 0
 #if FUSE_MAJOR_VERSION >= 3
 		          ,
 		          FUSE_FILL_DIR_PLUS
