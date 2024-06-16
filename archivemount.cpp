@@ -36,7 +36,6 @@
 #endif
 #include <fuse_opt.h>
 #include <grp.h>
-#include <limits>
 #include <map>
 #include <new>
 #include <pthread.h>
@@ -651,13 +650,11 @@ static int update_entry_stat(NODE * node) {
 	archive_entry_set_rdevmajor(node->entry, st.st_dev);
 	archive_entry_set_rdevminor(node->entry, st.st_dev);
 	pwd = getpwuid(st.st_uid);
-	if(pwd) {
-		archive_entry_set_uname(node->entry, strdup(pwd->pw_name));
-	}
+	if(pwd)
+		archive_entry_set_uname(node->entry, pwd->pw_name);
 	grp = getgrgid(st.st_gid);
-	if(grp) {
-		archive_entry_set_gname(node->entry, strdup(grp->gr_name));
-	}
+	if(grp)
+		archive_entry_set_gname(node->entry, grp->gr_name);
 	return 0;
 }
 
@@ -1238,7 +1235,7 @@ static int ar_mkdir(const char * path, mode_t mode) {
 		archive_entry_set_pathname(node->entry, node->name);
 	}
 	if((tmp = update_entry_stat(node)) < 0) {
-		log("mkdir: error stat'ing dir %s: %s", node->location, strerror(0 - tmp));
+		log("mkdir: error stat'ing dir %s: %s", node->location, strerror(-tmp));
 		rmdir(location);
 		free(location);
 		free_node(node);
