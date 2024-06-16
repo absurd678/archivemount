@@ -177,10 +177,8 @@ static void usage(const char * progname) {
 	        progname);
 }
 
-static int ar_opt_proc(void * data, const char * arg, int key, struct fuse_args * outargs) {
-	(void)data;
+static int ar_opt_proc(void *, const char * arg, int key, struct fuse_args * outargs) {
 	struct fuse_operations faux_oper;
-
 	switch(key) {
 		case FUSE_OPT_KEY_OPT:
 			return 1;
@@ -191,8 +189,11 @@ static int ar_opt_proc(void * data, const char * arg, int key, struct fuse_args 
 				return 0;
 			} else if(!mtpt) {
 				mtpt = arg;
+				return 1;
+			} else {
+				usage(outargs->argv[0]);
+				exit(1);
 			}
-			return 1;
 
 		case KEY_HELP:
 			usage(outargs->argv[0]);
