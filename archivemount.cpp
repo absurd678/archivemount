@@ -56,9 +56,6 @@
 #include <utime.h>
 #include <wchar.h>
 
-/**********/
-/* macros */
-/**********/
 #ifdef NDEBUG
 #define log(format, ...)
 #else
@@ -68,10 +65,6 @@
 #define lerrnum(err) lerr("%s", strerror(err))
 #define lerrno() lerrnum(errno)
 
-
-/*******************/
-/* data structures */
-/*******************/
 
 typedef struct node {
 	// ^ must be first
@@ -129,27 +122,17 @@ static const struct fuse_opt ar_opts[] = {AR_OPT("readonly", readonly, 1),
                                           FUSE_OPT_END};
 
 
-/***********/
-/* globals */
-/***********/
-
-static int archiveFd; /* file descriptor of archive file, just to keep the
-       beast alive in case somebody deletes the file while
-       it is mounted */
-static bool archiveModified  = false;
-static bool archiveWriteable = false;
+static int archiveFd;
+static bool archiveModified;
+static bool archiveWriteable;
 static NODE * root;
 static FORMATRAW_CACHE rawcache;
 static struct options options;
-static const char * mtpt           = NULL;
-static const char * archiveFile    = NULL;
-static char * user_passphrase      = NULL;
-static size_t user_passphrase_size = 0;
+static const char * mtpt;
+static const char * archiveFile;
+static char * user_passphrase;
 static pthread_mutex_t lock; /* global node tree lock */
 
-/**********************/
-/* internal functions */
-/**********************/
 
 static void usage(const char * progname) {
 	fprintf(stderr,
@@ -411,7 +394,7 @@ static int build_tree(mode_t mtpt_mode) {
 		const char * name;
 		/* find name of node */
 		name = archive_entry_pathname(cur->entry);
-		if(memcmp(name, "./\0", 3) == 0) {
+		if(memcmp(name, "./", 3) == 0) {
 			/* special case: the directory "./" must be skipped! */
 			continue;
 		}
@@ -669,7 +652,7 @@ static void write_new_modded_file(NODE * node, struct archive_entry * wentry, st
 		}
 		archive_entry_copy_stat(wentry, &st);
 		/* open temporary file */
-		fh = open(node->location, O_RDONLY);
+		fh = open(node->location, O_RDONLY | O_CLOEXEC);
 		if(fh == -1) {
 			lerr("Fatal error opening modified file %s at location %s, giving up", node->name, node->location);
 			return;
@@ -733,10 +716,10 @@ static int save(const char * archiveFile) {
 		char * buf = getcwd(NULL, 0);
 		log("Could not rename old archive file (%s/%s): %s", buf ?: "<unknown>", archiveFile, strerror(err));
 		free(buf);
-		archiveFd = open(archiveFile, O_RDONLY);
+		archiveFd = open(archiveFile, O_RDONLY | O_CLOEXEC);
 		return -err;
 	}
-	archiveFd = open(oldfilename, O_RDONLY);
+	archiveFd = open(oldfilename, O_RDONLY | O_CLOEXEC);
 	free(oldfilename);
 	/* open old archive */
 	if((oldarc = archive_read_new()) == NULL) {
@@ -764,7 +747,7 @@ static int save(const char * archiveFile) {
 		lerr("writing archives of format %d (%s) is not supported", format, archive_format_name(oldarc));
 		return -ENOTSUP;
 	}
-	tempfile = open(archiveFile, O_WRONLY | O_CREAT | O_EXCL, 0644);
+	tempfile = open(archiveFile, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
 	if(tempfile == -1) {
 		lerr("could not open new archive file for writing: %s", strerror(errno));
 		return -errno;
@@ -859,7 +842,7 @@ static int save(const char * archiveFile) {
 	archive_write_free(newarc);
 	close(tempfile);
 	close(archiveFd);
-	archiveFd = open(archiveFile, O_RDONLY);
+	archiveFd = open(archiveFile, O_RDONLY | O_CLOEXEC);
 	if(options.nobackup) {
 		if(unlink(oldfilename) == -1) {
 			lerr("Could not remove .orig archive file (%s): %s", oldfilename, strerror(errno));
@@ -982,7 +965,7 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 	if(node->modified) {
 		/* the file is new or modified, read temporary file instead */
 		int fh;
-		fh = open(node->location, O_RDONLY);
+		fh = open(node->location, O_RDONLY | O_CLOEXEC);
 		if(fh == -1) {
 			log("Fatal error opening modified file '%s' at location '%s', giving up", path, node->location);
 			return -errno;
@@ -1475,7 +1458,7 @@ static int realise_archived_file(const char * path, char ** location, struct fus
 	int tmp, fh;
 	if((tmp = get_temp_file_name(location)) < 0)
 		return tmp;
-	if((fh = open(*location, O_WRONLY | O_CREAT | O_EXCL, 0600)) == -1) {
+	if((fh = open(*location, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600)) == -1) {
 		log("error opening temp file %s: %s", *location, strerror(errno));
 		unlink(*location);
 		return -errno;
@@ -1542,7 +1525,7 @@ static int _ar_truncate(const char * path, off_t size) {
 	if(node->location) {
 		/* open existing temp file */
 		location = node->location;
-		if((fh = open(location, O_WRONLY)) == -1) {
+		if((fh = open(location, O_WRONLY | O_CLOEXEC)) == -1) {
 			log("error opening temp file %s: %s", location, strerror(errno));
 			unlink(location);
 			return -errno;
@@ -1619,7 +1602,7 @@ static int _ar_write(const char * path, const char * buf, size_t size, off_t off
 	if(node->location) {
 		/* open existing temp file */
 		location = node->location;
-		if((fh = open(location, O_WRONLY)) == -1) {
+		if((fh = open(location, O_WRONLY | O_CLOEXEC)) == -1) {
 			log("error opening temp file %s: %s", location, strerror(errno));
 			unlink(location);
 			return -errno;
@@ -2203,10 +2186,10 @@ static const struct fuse_operations ar_oper = {
 
 static struct termios noEcho() {
 	struct termios orig, t;
-	tcgetattr(STDIN_FILENO, &orig);
+	tcgetattr(0, &orig);
 	t = orig;
 	t.c_lflag &= ~ECHO;
-	tcsetattr(STDIN_FILENO, TCSANOW, &t);
+	tcsetattr(0, TCSANOW, &t);
 	return orig;
 }
 
@@ -2252,31 +2235,21 @@ int main(int argc, char ** argv) {
 	if(options.password) {
 		struct termios orig = noEcho();
 		fputs("Enter passphrase: ", stderr);
+		size_t user_passphrase_size;
 		getPassphrase(&user_passphrase, &user_passphrase_size, stdin);
 		fputs("\n", stderr);
-		tcsetattr(STDIN_FILENO, TCSANOW, &orig);
+		tcsetattr(0, TCSANOW, &orig);
 	}
 
 	if(options.formatraw)
 		options.readonly = true;
-	if(options.readonly) {
+	if(options.readonly)
 		fuse_opt_add_arg(&args, "-r");
-	} else {
-		/* check if archive is writeable */
-		archiveFd = open(archiveFile, O_RDWR);
-		if(archiveFd != -1) {
-			archiveWriteable = true;
-			close(archiveFd);
-		}
-	}
-	/* We want the temporary fuser version of the archive to be writable,*/
-	/* despite never actually writing the changes to disk.*/
-	if(options.nosave) {
-		archiveWriteable = true;
-	}
+	else
+		archiveWriteable = options.nosave || (access(archiveFile, W_OK) == 0);
 
 	/* open archive and read meta data */
-	archiveFd = open(archiveFile, O_RDONLY);
+	archiveFd = open(archiveFile, O_RDONLY | O_CLOEXEC);
 	if(archiveFd == -1) {
 		lerr("%s: %s", archiveFile, strerror(errno));
 		return 1;
@@ -2292,7 +2265,7 @@ int main(int argc, char ** argv) {
 
 	/* save directory this was started from */
 	if(!options.readonly && !options.nosave)
-		oldwd = open(".", 0);
+		oldwd = open(".", O_PATH | O_CLOEXEC);
 
 	/* Initialize the node tree lock */
 	pthread_mutex_init(&lock, NULL);
