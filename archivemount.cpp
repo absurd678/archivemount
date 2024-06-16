@@ -74,13 +74,13 @@
 typedef struct node {
 	// ^ must be first
 	struct node * parent;
-	char * name;                  /* fully qualified with prepended '/' */
-	std::string_view basename;    /* every after the last '/'; substring of name */
-	char * location;              /* location on disk for new/modified files, else NULL */
-	struct archive_entry * entry; /* libarchive header data */
+	char * name;                                 /* fully qualified with prepended '/' */
+	std::string_view basename;                   /* every after the last '/'; substring of name */
+	char * location;                             /* location on disk for new/modified files, else NULL */
+	struct archive_entry * entry;                /* libarchive header data */
 	std::map<std::string_view, node *> children; /* basename -> node */
-	bool namechanged;             /* true when file was renamed */
-	bool modified;                /* true when node was modified */
+	bool namechanged;                            /* true when file was renamed */
+	bool modified;                               /* true when node was modified */
 } NODE;
 
 // V1 UNIX-style caching: there's only one inode open, globally, at a time, at most
@@ -88,7 +88,7 @@ typedef struct node {
 static struct {
 	NODE * node;
 	struct archive * archive;
-	off_t offset_in_archive_file; // -1 = not yet found; -2 = poison
+	off_t offset_in_archive_file;  // -1 = not yet found; -2 = poison
 } last_open_node;
 
 
@@ -154,7 +154,7 @@ static void usage(const char * progname) {
 	        "usage: %s archivepath mountpoint [options]\n"
 	        "\n"
 	        "general options:\n"
-	        "    -o opt,[opt...]	    mount options\n"
+	        "    -o opt[,opt]...	    mount options\n"
 	        "    -h   --help		    print help\n"
 	        "    -V   --version	    print version\n"
 	        "\n"
@@ -168,7 +168,7 @@ static void usage(const char * progname) {
 	        "			    or use a format for saving which is\n"
 	        "			    not supported by archivemount.\n"
 	        "\n"
-	        "    -o subtree=<regexp>    use only subtree matching ^\\.\\?<regexp> from archive\n"
+	        "    -o subtree=regexp       use only subtree matching ^\\.\\?<regexp> from archive\n"
 	        "			    it implies readonly\n"
 	        "\n"
 	        "    -o formatraw	    treat input as a single element archive\n"
@@ -221,7 +221,7 @@ static NODE * init_node() {
 		return NULL;
 	}
 
-	node = new (node) NODE{.entry = archive_entry_new()};
+	node = new(node) NODE{.entry = archive_entry_new()};
 
 	if(node->entry == NULL) {
 		lerrno();
@@ -269,7 +269,7 @@ static int insert_by_path(NODE * root, NODE * node) {
 	key++;
 	while((temp = strchr(key, '/'))) {
 		size_t namlen = temp - key;
-		NODE * last = cur;
+		NODE * last   = cur;
 
 		std::string_view basename{key, namlen};
 		if(auto found = cur->children.find(basename); found != std::end(cur->children)) {
@@ -358,7 +358,7 @@ static int build_tree(mode_t mtpt_mode) {
 #define REG_ENHANCED 0
 #endif
 		if((regex_error = regcomp(&subtree, subtree_filter, REG_ENHANCED))) {
-			int es = regerror(regex_error, &subtree, NULL, 0);
+			int es  = regerror(regex_error, &subtree, NULL, 0);
 			auto eb = (char *)malloc(es);
 			if(eb)
 				regerror(regex_error, &subtree, eb, es);
@@ -659,7 +659,7 @@ static void write_new_modded_file(NODE * node, struct archive_entry * wentry, st
 		struct stat st;
 		int fh       = 0;
 		off_t offset = 0;
-		ssize_t len = 0;
+		ssize_t len  = 0;
 		/* copy stat info */
 		if(lstat(node->location, &st) != 0) {
 			lerr("Could not lstat temporary file %s: %s", node->location, strerror(errno));
@@ -727,8 +727,8 @@ static int save(const char * archiveFile) {
 	}
 	close(archiveFd);
 	if(rename(archiveFile, oldfilename) == -1) {
-		int err        = errno;
-		char * buf     = getcwd(NULL, 0);
+		int err    = errno;
+		char * buf = getcwd(NULL, 0);
 		log("Could not rename old archive file (%s/%s): %s", buf ?: "<unknown>", archiveFile, strerror(err));
 		free(buf);
 		archiveFd = open(archiveFile, O_RDONLY);
@@ -1003,7 +1003,7 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 
 		log("reopening: last_open_node.node = %p; node = %p; last_open_node.offset_in_archive_file = %ld; offset = %ld", last_open_node.node, node,
 		    last_open_node.offset_in_archive_file, offset);
-		last_open_node.node = node;
+		last_open_node.node                   = node;
 		last_open_node.offset_in_archive_file = -2;
 
 		if(archive) {
@@ -2167,34 +2167,32 @@ static ssize_t getPassphrase(char ** lineptr, size_t * n, FILE * stream) {
 
 int main(int argc, char ** argv) {
 	struct stat st;
-	int oldwd = -1;
+	int oldwd             = -1;
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
 	/* parse cmdline args */
 	if(fuse_opt_parse(&args, &options, ar_opts, ar_opt_proc) == -1)
 		return -1;
 	if(archiveFile == NULL) {
-		fprintf(stderr, "missing archive file\n");
-		fprintf(stderr, "see `%s -h' for usage\n", argv[0]);
-		return(1);
+		usage(argv[0]);
+		return (1);
 	}
 	if(mtpt == NULL) {
-		fprintf(stderr, "missing mount point\n");
-		fprintf(stderr, "see `%s -h' for usage\n", argv[0]);
-		return(1);
+		usage(argv[0]);
+		return (1);
 	}
 
 	/* check if mtpt is ok and writeable */
 	if(stat(mtpt, &st) != 0) {
 		lerr("%s: %s", mtpt, strerror(errno));
-		return(1);
+		return (1);
 	}
 	// https://github.com/libfuse/libfuse/commit/64e11073b9347fcf9c6d1eea143763ba9e946f70
 	if(!strncmp(mtpt, "/dev/fd/", sizeof("/dev/fd/") - 1))
 		st.st_mode = (st.st_mode & ~S_IFMT) | S_IFDIR;
 	else if(!S_ISDIR(st.st_mode)) {
 		lerr("%s: %s", mtpt, strerror(ENOTDIR));
-		return(1);
+		return (1);
 	}
 
 	if(options.password) {
