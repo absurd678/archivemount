@@ -361,7 +361,6 @@ static int build_tree(const char * mtpt) {
 			fprintf(stderr, "%s\n", archive_error_string(archive));
 			return archive_errno(archive);
 		}
-		options.readonly = 1;
 	} else {
 		if(archive_read_support_format_all(archive) != ARCHIVE_OK) {
 			fprintf(stderr, "%s\n", archive_error_string(archive));
@@ -893,27 +892,15 @@ static int _ar_open_raw(void)
 {
 	// open archive and search first entry
 
-	const char path[] = "/data";
-
 	int ret = -1;
 	const char * realpath;
-	NODE * node;
-	log("_ar_open_raw called, path: '%s'", path);
+	NODE * node = firstchild(root)
+	log("_ar_open_raw called, path: '%s'", node->name);
 
 
 	if(rawcache.opened != 0) {
 		log("already opened");
 		return 0;
-	}
-
-	options.readonly = 1;
-
-	/* find node */
-
-	node = get_node_for_path(root, path);
-	if(!node) {
-		log("get_node_for_path error");
-		return -ENOENT;
 	}
 
 	//	struct archive *archive;
@@ -1077,7 +1064,6 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 				log("archive_read_support_format_all(): %s (%d)\n", archive_error_string(archive), archive_ret);
 				return -EIO;
 			}
-			options.readonly = 1;
 		} else {
 			archive_ret = archive_read_support_format_all(archive);
 			if(archive_ret != ARCHIVE_OK) {
@@ -1188,8 +1174,6 @@ static off_t _ar_getsizeraw(const char * path) {
 			log("archive_read_support_format_raw(): %s (%d)\n", archive_error_string(archive), archive_ret);
 			return -EIO;
 		}
-		options.readonly  = 1;
-		options.formatraw = 1;
 	}
 
 	if(options.password) {
@@ -2344,6 +2328,9 @@ int main(int argc, char ** argv) {
 		tcsetattr(STDIN_FILENO, TCSANOW, &orig);
 	}
 
+
+	if(options.formatraw)
+		options.readonly = true;
 	if(options.readonly) {
 		fuse_opt_add_arg(&args, "-r");
 	} else {
@@ -2369,10 +2356,9 @@ int main(int argc, char ** argv) {
 	if(build_tree(mtpt) != 0) {
 		return(1);
 	}
-
 	if(options.formatraw) {
 		/* create rawcache */
-		rawcache.st.st_size = _ar_getsizeraw("/data");
+		rawcache.st.st_size = _ar_getsizeraw(firstchild(root)->name);
 		// log("cache st_size = %ld",rawcache.st.st_size);
 	}
 
