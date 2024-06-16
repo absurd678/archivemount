@@ -2295,6 +2295,9 @@ int main(int argc, char ** argv) {
 		// log("cache st_size = %ld",rawcache.st_size);
 	}
 
+#ifndef O_PATH
+#define O_PATH O_RDONLY
+#endif
 	/* save directory this was started from */
 	if(!options.readonly && !options.nosave)
 		oldwd = open(".", O_PATH | O_CLOEXEC);
