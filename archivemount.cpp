@@ -449,18 +449,20 @@ static int build_tree(mode_t mtpt_mode) {
 			/* remove trailing '/' for directories */
 			cur->basename = strrchr(cur->name, '/') + 1;
 
+			// ar archives have S_IFMT bits clear (https://github.com/libarchive/libarchive/issues/2241)
+			if(auto mode = archive_entry_mode(cur->entry); (mode & S_IFMT) == 0)
+				archive_entry_set_mode(cur->entry, mode | S_IFREG);
+
 			/* references */
-			int err;
-			if((err = insert_by_path(root, cur))) {
+			if(int err; (err = insert_by_path(root, cur))) {
 				lerr("ERROR: could not insert %s into tree: %s", cur->name, strerror(-err));
 				return -ENOENT;
 			}
+
+			if((cur = init_node()) == NULL)
+				return -ENOMEM;
 		} else {
 			/* this is the directory the subtree filter matches, or a root directory, do not respect it */
-		}
-
-		if((cur = init_node()) == NULL) {
-			return -ENOMEM;
 		}
 
 		archive_read_data_skip(archive);
