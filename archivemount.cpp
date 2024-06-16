@@ -2363,7 +2363,8 @@ int main(int argc, char ** argv) {
 	}
 
 	/* save directory this was started from */
-	oldwd = open(".", 0);
+	if(!options.readonly && !options.nosave)
+		oldwd = open(".", 0);
 
 	/* Initialize the node tree lock */
 	pthread_mutex_init(&lock, NULL);

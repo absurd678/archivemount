@@ -37,7 +37,7 @@ Upstream (https://github.com/cybernoid/archivemount) bugs:
 PRs:
   [     ] #22: Add support for fuse3
   [     ] #20: Add support for /dev/fd/%u mountpoints
-  [     ] #19: Don't fchdir at unmount when mounting read-only
+  [sssss] #19: Don't fchdir at unmount when mounting read-only
   [sssss] #18: Honor raw archives' pathname
 
 x – fundamentally invalid; l – libarchive bug; ? – incoherent; s – superseded
