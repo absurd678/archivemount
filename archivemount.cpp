@@ -21,7 +21,7 @@
 #define _XOPEN_SOURCE 500
 #endif
 
-#define FUSE_USE_VERSION 26
+#define FUSE_USE_VERSION 30
 
 #define BLOCK_SIZE 10240
 
@@ -31,7 +31,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
-#include <fuse/fuse_lowlevel.h>
+#include <fuse_lowlevel.h>
 #include <fuse_opt.h>
 #include <grp.h>
 #include <map>
@@ -1263,7 +1263,7 @@ static int _ar_getattr(const char * path, struct stat * stbuf) {
 	return 0;
 }
 
-static int ar_getattr(const char * path, struct stat * stbuf) {
+static int ar_getattr(const char * path, struct stat * stbuf, struct fuse_file_info *) {
 	// log("ar_getattr called, path: '%s'", path);
 	int ret = pthread_mutex_lock(&lock);
 	if(ret) {
@@ -1670,7 +1670,7 @@ static int _ar_truncate(const char * path, off_t size) {
 	return ret;
 }
 
-static int ar_truncate(const char * path, off_t size) {
+static int ar_truncate(const char * path, off_t size, struct fuse_file_info *) {
 	int ret;
 	log("ar_truncate called, path '%s'", path);
 	pthread_mutex_lock(&lock);
@@ -1883,7 +1883,7 @@ static int _ar_chmod(const char * path, mode_t mode) {
 	return 0;
 }
 
-static int ar_chmod(const char * path, mode_t mode) {
+static int ar_chmod(const char * path, mode_t mode, struct fuse_file_info *) {
 	log("ar_chmod called, path '%s', mode: %o", path, mode);
 	int ret;
 	pthread_mutex_lock(&lock);
@@ -1914,7 +1914,7 @@ static int _ar_chown(const char * path, uid_t uid, gid_t gid) {
 	return 0;
 }
 
-static int ar_chown(const char * path, uid_t uid, gid_t gid) {
+static int ar_chown(const char * path, uid_t uid, gid_t gid, struct fuse_file_info *) {
 	log("ar_chown called, %s", path);
 	int ret;
 	pthread_mutex_lock(&lock);
@@ -1923,7 +1923,7 @@ static int ar_chown(const char * path, uid_t uid, gid_t gid) {
 	return ret;
 }
 
-static int _ar_utime(const char * path, struct utimbuf * buf) {
+static int _ar_utime(const char * path, const struct timespec tv[2]) {
 	NODE * node;
 
 	log("_ar_utime called, %s", path);
@@ -1936,30 +1936,29 @@ static int _ar_utime(const char * path, struct utimbuf * buf) {
 	}
 	if(archive_entry_hardlink(node->entry)) {
 		/* file is a hardlink, recurse into it */
-		return _ar_utime(archive_entry_hardlink(node->entry), buf);
+		return _ar_utime(archive_entry_hardlink(node->entry), tv);
 	}
 	if(archive_entry_symlink(node->entry)) {
 		/* file is a symlink, recurse into it */
-		return _ar_utime(archive_entry_symlink(node->entry), buf);
+		return _ar_utime(archive_entry_symlink(node->entry), tv);
 	}
-	archive_entry_set_mtime(node->entry, buf->modtime, 0);
-	archive_entry_set_atime(node->entry, buf->actime, 0);
+	archive_entry_set_atime(node->entry, tv[0].tv_sec, tv[0].tv_nsec);
+	archive_entry_set_mtime(node->entry, tv[1].tv_sec, tv[1].tv_nsec);
 	archiveModified = true;
 	return 0;
 }
 
-static int ar_utime(const char * path, struct utimbuf * buf) {
-	log("ar_utime called, %s", path);
+static int ar_utimens(const char * path, const struct timespec tv[2], struct fuse_file_info *) {
+	log("ar_utimens called, %s", path);
 	int ret;
 	pthread_mutex_lock(&lock);
-	ret = _ar_utime(path, buf);
+	ret = _ar_utime(path, tv);
 	pthread_mutex_unlock(&lock);
 	return ret;
 }
 
 static int ar_statfs(const char * path, struct statvfs * stbuf) {
 	(void)path;
-
 	log("ar_statfs called, %s", path);
 
 	/* Adapted the following from sshfs.c */
@@ -1976,15 +1975,16 @@ static int ar_statfs(const char * path, struct statvfs * stbuf) {
 	return 0;
 }
 
-static int ar_rename(const char * from, const char * to) {
+static int ar_rename(const char * from, const char * to, unsigned flags) {
 	NODE * from_node;
 	int ret = 0;
 	char * temp_name;
 
-	log("ar_rename called, from: '%s', to: '%s'", from, to);
-	if(!archiveWriteable || options.readonly) {
+	log("ar_rename called, from: '%s', to: '%s', flags=%x", from, to, flags);
+	if(!archiveWriteable || options.readonly)
 		return -EROFS;
-	}
+	if(flags)
+		return -EOPNOTSUPP;
 	pthread_mutex_lock(&lock);
 	from_node = get_node_for_path(root, from);
 	if(!from_node) {
@@ -2109,7 +2109,7 @@ static int ar_release(const char * path, struct fuse_file_info * fi) {
 	return 0;
 }
 
-static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info * fi) {
+static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info * fi, enum fuse_readdir_flags) {
 	NODE * node;
 	(void)offset;
 	(void)fi;
@@ -2127,8 +2127,8 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 		return -ENOENT;
 	}
 
-	filler(buf, ".", NULL, 0);
-	filler(buf, "..", NULL, 0);
+	filler(buf, ".", NULL, 0, FUSE_FILL_DIR_PLUS);
+	filler(buf, "..", NULL, 0, FUSE_FILL_DIR_PLUS);
 
 	for(auto && [_, child] : node->children) {
 		const struct stat * st;
@@ -2150,7 +2150,7 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 		st_copy.st_blocks   = (st_copy.st_size + 511) / 512;
 		st_copy.st_blksize  = 4096;
 
-		if(filler(buf, child->basename.data(), &st_copy, 0)) {
+		if(filler(buf, child->basename.data(), &st_copy, 0, FUSE_FILL_DIR_PLUS)) {
 			pthread_mutex_unlock(&lock);
 			return -ENOMEM;
 		}
@@ -2241,7 +2241,7 @@ static const struct fuse_operations ar_oper = {
     .chmod    = ar_chmod,
     .chown    = ar_chown,
     .truncate = ar_truncate,
-    .utime    = ar_utime,
+    .utimens  = ar_utimens,
     .open     = ar_open,
     .read     = ar_read,
     .write    = ar_write,
@@ -2268,7 +2268,6 @@ static const struct fuse_operations ar_oper = {
     //.ftruncate	  = ar_ftruncate,  // int(*ftruncate)(const char *, off_t, struct fuse_file_info *)
     //.fgetattr	  = ar_fgetattr,   // int(*fgetattr)(const char *, struct stat *, struct fuse_file_info *)
     //.lock		  = ar_lock,	   // int(*lock)(const char *, struct fuse_file_info *, int cmd, struct flock *)
-    //.utimens	  = ar_utimens,    // int(*utimens)(const char *, const struct timespec tv[2])
     //.bmap		  = ar_bmap,	   // int(*bmap)(const char *, size_t blocksize, uint64_t *idx)
 };
 
@@ -2376,74 +2375,7 @@ int main(int argc, char ** argv) {
 	 */
 	fuse_opt_add_arg(&args, "-s");
 
-#if FUSE_VERSION >= 26
-	{
-		struct fuse * fuse;
-		struct fuse_chan * ch;
-		char * mountpoint;
-		int multithreaded;
-		int foreground;
-#ifdef FUSE_NUMA
-		int numa;
-#endif
-		int res;
-
-		res = fuse_parse_cmdline(&args, &mountpoint, &multithreaded,
-#ifdef FUSE_NUMA
-		                         &foreground, &numa
-#else
-		                         &foreground
-#endif
-		);
-		if(res == -1)
-			return(1);
-
-		ch = fuse_mount(mountpoint, &args);
-		if(!ch)
-			return(1);
-
-		res = fcntl(fuse_chan_fd(ch), F_SETFD, FD_CLOEXEC);
-		if(res == -1)
-			lerr("WARNING: failed to set FD_CLOEXEC on fuse device");
-
-		fuse = fuse_new(ch, &args, &ar_oper, sizeof(struct fuse_operations), NULL);
-		if(fuse == NULL) {
-			fuse_unmount(mountpoint, ch);
-			return(1);
-		}
-
-		/* now do the real mount */
-		res = fuse_daemonize(foreground);
-		if(res != -1)
-			res = fuse_set_signal_handlers(fuse_get_session(fuse));
-
-		if(res == -1) {
-			fuse_unmount(mountpoint, ch);
-			fuse_destroy(fuse);
-			return(1);
-		}
-
-		if(multithreaded)
-			res = fuse_loop_mt(fuse);
-		else
-			res = fuse_loop(fuse);
-
-		if(res == -1)
-			res = 1;
-		else
-			res = 0;
-
-		fuse_remove_signal_handlers(fuse_get_session(fuse));
-		fuse_unmount(mountpoint, ch);
-		fuse_destroy(fuse);
-		free(mountpoint);
-	}
-#else
-	{
-		/* now do the real mount */
-		fuse_main(args.argc, args.argv, &ar_oper, NULL);
-	}
-#endif
+	fuse_main(args.argc, args.argv, &ar_oper, NULL);
 
 	/* save changes if modified; must be in original directory (libarchive can chdir) */
 	if(archiveWriteable && !options.readonly && archiveModified && !options.nosave) {

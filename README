@@ -6,7 +6,7 @@ archive (as in .tar.gz or .zip or .iso) and use it like an ordinary filesystem.
 
 Requirements
 ------------
-You will need GNU Make, libarchive-dev, libfuse-dev, and pkgconf
+You will need GNU Make, libarchive-dev, libfuse3-dev, and pkgconf
 (or just the libraries and fix up cc *.c manually).
 
 -ng
@@ -28,19 +28,19 @@ Debian bugs:
 Upstream (https://github.com/cybernoid/archivemount) bugs:
   [0.8.9] #28: Chokes on CSRG ISO
   [     ] #21: Quadratic complexity when reading large entries
-  [     ] #27: fuse.pc is fuse3.pc nowadays
+  [sssss] #27: fuse.pc is fuse3.pc nowadays
   [     ] #26: feature request: zstd support
   [     ] #25: archivemount can't read .img.gz
   [     ] #23: feature request: .xz compressed files support?
   [     ] #14: Create a table which shows supported formats && read / write support
   [     ] #17: Update homepage in apt show archivemount
 PRs:
-  [     ] #22: Add support for fuse3
-  [     ] #20: Add support for /dev/fd/%u mountpoints
+  [sssss] #22: Add support for fuse3
+  [mmmmm] #20: Add support for /dev/fd/%u mountpoints
   [sssss] #19: Don't fchdir at unmount when mounting read-only
   [sssss] #18: Honor raw archives' pathname
 
-x – fundamentally invalid; l – libarchive bug; ? – incoherent; s – superseded
+x – fundamentally invalid; l – libarchive bug; ? – incoherent; s – superseded; m – merged
 
 Write support
 -------------
