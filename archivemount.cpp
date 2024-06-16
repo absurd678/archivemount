@@ -187,7 +187,7 @@ static int ar_opt_proc(void *, const char * arg, int key, struct fuse_args * out
 			exit(1);
 
 		case KEY_VERSION:
-			fprintf(stderr, "archivemount version %s\n", VERSION);
+			puts("archivemount version " VERSION);
 			fuse_opt_add_arg(outargs, "--version");
 			fuse_main(outargs->argc, outargs->argv, &faux_oper, NULL);
 			exit(0);
