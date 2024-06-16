@@ -1161,7 +1161,12 @@ static int _ar_getattr(const char * path, struct stat * stbuf) {
 	return 0;
 }
 
-static int ar_getattr(const char * path, struct stat * stbuf, struct fuse_file_info *) {
+static int ar_getattr(const char * path, struct stat * stbuf
+#if FUSE_MAJOR_VERSION >= 3
+                      ,
+                      struct fuse_file_info *
+#endif
+) {
 	// log("ar_getattr called, path: '%s'", path);
 	int ret = pthread_mutex_lock(&lock);
 	if(ret) {
@@ -1568,7 +1573,12 @@ static int _ar_truncate(const char * path, off_t size) {
 	return ret;
 }
 
-static int ar_truncate(const char * path, off_t size, struct fuse_file_info *) {
+static int ar_truncate(const char * path, off_t size
+#if FUSE_MAJOR_VERSION >= 3
+                       ,
+                       struct fuse_file_info *
+#endif
+) {
 	int ret;
 	log("ar_truncate called, path '%s'", path);
 	pthread_mutex_lock(&lock);
@@ -1781,7 +1791,12 @@ static int _ar_chmod(const char * path, mode_t mode) {
 	return 0;
 }
 
-static int ar_chmod(const char * path, mode_t mode, struct fuse_file_info *) {
+static int ar_chmod(const char * path, mode_t mode
+#if FUSE_MAJOR_VERSION >= 3
+                    ,
+                    struct fuse_file_info *
+#endif
+) {
 	log("ar_chmod called, path '%s', mode: %o", path, mode);
 	int ret;
 	pthread_mutex_lock(&lock);
@@ -1812,7 +1827,12 @@ static int _ar_chown(const char * path, uid_t uid, gid_t gid) {
 	return 0;
 }
 
-static int ar_chown(const char * path, uid_t uid, gid_t gid, struct fuse_file_info *) {
+static int ar_chown(const char * path, uid_t uid, gid_t gid
+#if FUSE_MAJOR_VERSION >= 3
+                    ,
+                    struct fuse_file_info *
+#endif
+) {
 	log("ar_chown called, %s", path);
 	int ret;
 	pthread_mutex_lock(&lock);
@@ -1846,7 +1866,12 @@ static int _ar_utime(const char * path, const struct timespec tv[2]) {
 	return 0;
 }
 
-static int ar_utimens(const char * path, const struct timespec tv[2], struct fuse_file_info *) {
+static int ar_utimens(const char * path, const struct timespec tv[2]
+#if FUSE_MAJOR_VERSION >= 3
+                      ,
+                      struct fuse_file_info *
+#endif
+) {
 	log("ar_utimens called, %s", path);
 	int ret;
 	pthread_mutex_lock(&lock);
@@ -1873,7 +1898,12 @@ static int ar_statfs(const char * path, struct statvfs * stbuf) {
 	return 0;
 }
 
-static int ar_rename(const char * from, const char * to, unsigned flags) {
+static int ar_rename(const char * from, const char * to
+#if FUSE_MAJOR_VERSION >= 3
+                     ,
+                     unsigned flags
+#endif
+) {
 	NODE * from_node;
 	int ret = 0;
 	char * temp_name;
@@ -1881,8 +1911,10 @@ static int ar_rename(const char * from, const char * to, unsigned flags) {
 	log("ar_rename called, from: '%s', to: '%s', flags=%x", from, to, flags);
 	if(!archiveWriteable || options.readonly)
 		return -EROFS;
+#if FUSE_MAJOR_VERSION >= 3
 	if(flags)
 		return -EOPNOTSUPP;
+#endif
 	pthread_mutex_lock(&lock);
 	from_node = get_node_for_path(root, from);
 	if(!from_node) {
@@ -2004,7 +2036,12 @@ static int ar_release(const char * path, struct fuse_file_info * fi) {
 	return 0;
 }
 
-static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info * fi, enum fuse_readdir_flags) {
+static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info * fi
+#if FUSE_MAJOR_VERSION >= 3
+                      ,
+                      enum fuse_readdir_flags
+#endif
+) {
 	NODE * node;
 	(void)offset;
 	(void)fi;
@@ -2022,8 +2059,18 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 		return -ENOENT;
 	}
 
-	filler(buf, ".", NULL, 0, FUSE_FILL_DIR_PLUS);
-	filler(buf, "..", NULL, 0, FUSE_FILL_DIR_PLUS);
+	filler(buf, ".", NULL, 0
+#if FUSE_MAJOR_VERSION >= 3
+	       ,
+	       FUSE_FILL_DIR_PLUS
+#endif
+	);
+	filler(buf, "..", NULL, 0
+#if FUSE_MAJOR_VERSION >= 3
+	       ,
+	       FUSE_FILL_DIR_PLUS
+#endif
+	);
 
 	for(auto && [_, child] : node->children) {
 		const struct stat * st;
@@ -2045,7 +2092,12 @@ static int ar_readdir(const char * path, void * buf, fuse_fill_dir_t filler, off
 		st_copy.st_blocks   = (st_copy.st_size + 511) / 512;
 		st_copy.st_blksize  = 4096;
 
-		if(filler(buf, child->basename.data(), &st_copy, 0, FUSE_FILL_DIR_PLUS)) {
+		if(filler(buf, child->basename.data(), &st_copy, 0
+#if FUSE_MAJOR_VERSION >= 3
+		          ,
+		          FUSE_FILL_DIR_PLUS
+#endif
+		          )) {
 			pthread_mutex_unlock(&lock);
 			return -ENOMEM;
 		}
@@ -2228,7 +2280,7 @@ int main(int argc, char ** argv) {
 		return 1;
 	}
 	if(build_tree(st.st_mode) != 0) {
-		return(1);
+		return (1);
 	}
 	if(options.formatraw) {
 		/* create rawcache */

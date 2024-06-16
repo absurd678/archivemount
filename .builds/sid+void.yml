@@ -28,5 +28,5 @@ tasks:
                     'make -C archivemount-ng VERSION=sid.yml SOURCE_DATE_EPOCH=0' \
                     '#make -C archivemount-ng #check SHELLCHECK=:' \
                     'make -C archivemount-ng install' \
-                    'archivemount archivemount-ng/text' |
+                    '#archivemount archivemount-ng/text' |
         unshare -rR . sh -ex

@@ -4,6 +4,7 @@
 CC ?= cc
 CXX ?= c++
 PKG_CONFIG ?= pkg-config
+FUSES ?= fuse3 fuse
 VERSION ?= $(shell git describe)
 DATE_EPOCH = date $(shell date -d @0 > /dev/null 2>&1 && echo "-d @" || echo "-r ")
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --no-show-signature --format=%at "archivemount.1.in")
@@ -11,12 +12,12 @@ MANUAL_DATE ?= $(shell $(DATE_EPOCH)$(SOURCE_DATE_EPOCH) +"%B %e, %Y")
 PREFIX ?= /usr/local
 
 
-ADD_L := $(shell for p in fuse3 libarchive; do $(PKG_CONFIG) --cflags $$p; done 2>/dev/null) -O3 -g -Wall -Wextra
+ADD_L    := $(shell $(PKG_CONFIG) --cflags libarchive 2>/dev/null)                 $(shell for p in $(FUSES); do $(PKG_CONFIG) --cflags $$p && exit; done 2>/dev/null) -O3 -g -Wall -Wextra
 
 CPPFLAGS += -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -DVERSION='"$(VERSION)"' $(if $(DEBUG),,-DNDEBUG)
 CFLAGS   += $(ADD_L)
 CXXFLAGS += $(ADD_L) -fno-exceptions -fno-rtti -Wno-missing-field-initializers -std=c++2b  # c++23 isn't understood by everyone
-LDLIBS   += $(shell for p in fuse3 libarchive; do $(PKG_CONFIG) --libs $$p || echo -l$${p#lib}; done 2>/dev/null)
+LDLIBS   += $(shell $(PKG_CONFIG) --libs libarchive 2>/dev/null || echo -larchive) $(shell for p in $(FUSES); do $(PKG_CONFIG) --libs $$p && exit; done 2>/dev/null; echo -l$(firstword $(FUSES)))
 
 
 .PHONY: all check clean install
