@@ -25,6 +25,8 @@ LDLIBS   += $(shell $(PKG_CONFIG) --libs libarchive 2>/dev/null || echo -larchiv
 all: archivemount archivemount.1
 clean:
 	rm -rf archivemount archivemount.1
+check: archivemount
+	./test
 
 
 install: all

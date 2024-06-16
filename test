@@ -1,0 +1,26 @@
+#!/bin/sh
+# SPDX-License-Identifier: 0BSD
+
+trap 'umount "${tmpd}m" 2>/dev/null; rm -rf "$tmpd"' EXIT INT
+tmpd="$(mktemp -d)/"
+
+
+ar r "${tmpd}ar" archivemount.cpp archivemount.1.in 2>/dev/null
+mkdir "${tmpd}m"
+./archivemount -f "${tmpd}ar" "${tmpd}m" &
+sleep 0.1
+for f in archivemount.cpp archivemount.1.in; do
+	cmp "$f" "${tmpd}m/$f" || exit
+done
+umount "${tmpd}m"
+wait $! || exit
+
+
+tar -cf "${tmpd}tar" archivemount.cpp archivemount.1.in
+./archivemount -f "${tmpd}tar" "${tmpd}m" &
+sleep 0.1
+for f in archivemount.cpp archivemount.1.in; do
+	cmp "$f" "${tmpd}m/$f" || exit
+done
+umount "${tmpd}m"
+wait $! || exit

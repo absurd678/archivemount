@@ -5,8 +5,7 @@ packages:
   - libarchive
 tasks:
   - build: |
-      gmake -C archivemount-ng all #check
+      gmake -C archivemount-ng all
+      doas gmake -C archivemount-ng check
   - install: |
       doas gmake -C archivemount-ng install
-  #- smoketest: |
-  #    archivemount archivemount-ng/text

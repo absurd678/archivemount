@@ -5,9 +5,9 @@ packages:
   - pkgconf
   - fusefs-libs
 tasks:
+  - fuse: |
+      sudo kldload fusefs
   - build: |
-      gmake -C archivemount-ng all #check
+      gmake -C archivemount-ng all check
   - install: |
       sudo gmake -C archivemount-ng install
-  #- smoketest: |
-  #    archivemount archivemount-ng/text
