@@ -6,29 +6,64 @@
 .
 .Sh NAME
 .Nm archivemount
-.Nd mount an archive for access as a file system
+.Nd mount an archive for access as a filesystem
 .Sh SYNOPSIS
 .Nm
-.Op Fl hVdfs
-.Op Fl o Ar option Ns Oo , Ns Ar option Oc Ns …
+.Op Fl hVdf
+.Oo Fl o Ar option Ns Oo , Ns Ar option Oc Ns … Oc Ns …
 .Ar archive
 .Ar mountpoint
 .
 .Sh DESCRIPTION
-Mounts file tree contained in
+Mounts, through
+.Xr fuse 8 ,
+a file tree contained in
 .Ar archive
 on directory
 .Ar mountpoint .
-.Xr umount 8
-can later reverse this mapping.
+.ie t .br
+.Nm umount
+and
+.Nm fusermount Fl u
+can undo this mapping.
 .
 .Sh EXAMPLES
+.ie t \{ .
+.mk
+.Bd -literal -compact -offset 42n
+.Li $ Nm tar Fl tf Pa voreutils.tar.gz
+src/            src/…
+man/            man/aliases      man/basename.1
+README.md
+.Li $ Nm Fl o Cm subtree Ns = Ns Ar man Li \e
+.Li " " "            " Pa voreutils.tar.gz mnt
+.Li $ Nm ls Pa mnt
+aliases         basename.1       …
+.Ed
+.rt
 .Bd -literal -compact
 .Li $ Nm ls
 files.tar.gz    mnt/
 .Li $ Nm tar Fl tf Pa files.tar.gz
-file1
-file2
+file1           file2
+.Li $ Nm Pa files.tar.gz mnt
+.Li $ Nm ls Pa mnt
+file1           file2
+.Li $ Ic echo Li zupa > Pa mnt/file3
+.Li $ Nm rm Pa mnt/file1
+.Li $ Nm umount Pa mnt
+.Li $ Nm ls
+files.tar.gz    files.tar.gz.orig       mnt/
+.Li $ Nm tar Fl tf Pa files.tar.gz
+file2           file3
+.Ed
+. \}
+.el \{
+.Bd -literal -compact
+.Li $ Nm ls
+files.tar.gz    mnt/
+.Li $ Nm tar Fl tf Pa files.tar.gz
+file1           file2
 .Li $ Nm Pa files.tar.gz mnt
 .Li $ Nm ls mnt
 file1           file2
@@ -36,31 +71,41 @@ file1           file2
 .Li $ Nm rm Pa mnt/file1
 .Li $ Nm umount Pa mnt
 .Li $ Nm ls
-files.tar.gz    files.tar.gz.orig               mnt/
+files.tar.gz    files.tar.gz.orig       mnt/
 .Li $ Nm tar Fl tf Pa files.tar.gz
-file2
-file3
+file2           file3
 .Ed
+.Pp
+.Bd -literal -compact
+.Li $ Nm tar Fl tf Pa voreutils.tar.gz
+src/            src/…
+man/            man/aliases              man/basename.1
+README.md
+.Li $ Nm Fl o Cm subtree Ns = Ns Ar man Pa voreutils.tar.gz mnt
+.Li $ Nm ls Pa mnt
+aliases         basename.1
+.Ed
+. .\}
 .
 .Sh OPTIONS
 See
 .Xr fuse 8
 for a complete list of the baseline FUSE options supported.
+.if t .br
 The following options are handled specially by
 .Nm :
 .Bl -tag -compact -width ".Fl o Cm subtree Ns = Ns Ar regex"
 .It Fl h , -help
-Write usage and all available options to standard error stream, then exit
-.Sy 1 .
+Write usage and all available options to standard error stream, then exit.
 .
 .It Fl V , -version
 Write version of
-.Nm
-and its dependencies to standard output and error streams (intermingled), then exit.
+.Nm ,
+libarchive,
+and FUSE to the standard output stream, then exit.
 .Pp
 .
-.It Fl o Cm readonly , Fl o Cm ro , Fl r
-Disable writes entirely.
+.It Fl r , Fl o Cm ro , Fl o Cm readonly Ns : Disable writes entirely.
 .
 .It Fl o Cm password
 Prompt for archive passphrase.
@@ -73,27 +118,27 @@ is moved to
 This flag removes that file afterward.
 .
 .It Fl o Cm nosave
-Allow writes, but don't write them out.
+Allow writes in memory, but don't actually write them out on unmount.
 .Pp
 .
 .It Fl o Cm subtree Ns = Ns Ar regex
 Hide files not matching
 .Ar regex ,
-and on those that do match, remove the match from the filename.
+and on those that do match, remove the matched prefix (cf. second example above).
 .Ar regex
 is a basic regular expression that behaves as-if prepended with the equivalent of
 .Qq Li ^.? .
 Implies
-.Fl o Cm readonly .
+.Fl r .
 .
 .It Fl o Cm formatraw
 .Ar archive
 is actually a compressed file, made available under
-.Ar mounpoint Ns Pa / Ns Ar saved.filename
+.Ar mounpoint Ns Pa / Ns Ar saved-filename
 or
 .Ar mounpoint Ns Pa /data .
 Implies
-.Fl o Cm readonly .
+.Fl r .
 .El
 .
 .Sh BUGS
@@ -103,7 +148,11 @@ Writing archives, probably.
 See
 .Xr libarchive 3
 for a definitive list, but
-all kinds of tar/ustar/pax/cpio archives, 7-Zip, ISO9660 CDs, ar, and RAR/Zip may be read.
+all kinds of
+.Nm tar Ns / Ns No ustar Ns / Ns Nm pax Ns / Ns Nm cpio
+archives, 7-Zip, ISO9660,
+.Nm ar ,
+and RAR/Zip may be read.
 These may be compressed with
 .Xr gzip 1 ,
 .Xr xz 1 ,
@@ -112,6 +161,7 @@ These may be compressed with
 The same applies for writing (except you can't write RARs).
 .
 .Sh SEE ALSO
+.Xr fusermount 1 ,
 .Xr libarchive 3 ,
 .Xr regex 7 ,
 .Xr fuse 8 ,
