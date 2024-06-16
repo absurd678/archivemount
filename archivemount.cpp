@@ -397,7 +397,7 @@ static int build_tree(const char * mtpt) {
 	fstat(archiveFd, &st);
 	archive_entry_set_gid(root->entry, getgid());
 	archive_entry_set_uid(root->entry, getuid());
-	archive_entry_set_mode(root->entry, st.st_mtime);
+	archive_entry_set_mtime(root->entry, st.st_mtim.tv_sec, st.st_mtim.tv_nsec);
 	archive_entry_set_pathname(root->entry, "/");
 	archive_entry_set_size(root->entry, st.st_size);
 	stat(mtpt, &st);
