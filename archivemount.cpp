@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: LGPL-2.0-or-later
 /*
-
    Copyright (c) 2005-2018 Andre Landwehr <andrel@cybernoia.de>
-
-   This program can be distributed under the terms of the GNU LGPL.
-   See the file COPYING.
 
    Based on: fusexmp.c and sshfs.c by Miklos Szeredi <miklos@szeredi.hu>
 
@@ -16,10 +13,6 @@
                      Alain Parmentier <pa at infodata.lu>
 */
 
-#ifdef linux
-/* For pread()/pwrite() */
-#define _XOPEN_SOURCE 500
-#endif
 
 #define FUSE_USE_VERSION 30
 
@@ -32,9 +25,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
-#if __has_include(<fuse_lowlevel.h>)
-#include <fuse_lowlevel.h>
-#endif
 #include <fuse_opt.h>
 #include <grp.h>
 #include <map>
@@ -43,7 +33,6 @@
 #include <pwd.h>
 #include <regex.h>
 #include <stdarg.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
