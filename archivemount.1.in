@@ -58,7 +58,7 @@ files.tar.gz    files.tar.gz.orig       mnt/
 file2           file3
 .Ed
 . \}
-.el \{
+.el \{ .
 .Bd -literal -compact
 .Li $ Nm ls
 files.tar.gz    mnt/
@@ -85,7 +85,7 @@ README.md
 .Li $ Nm ls Pa mnt
 aliases         basename.1
 .Ed
-. .\}
+. \}
 .
 .Sh OPTIONS
 See
