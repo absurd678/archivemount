@@ -27,20 +27,20 @@ Debian bugs:
 
 Upstream (https://github.com/cybernoid/archivemount) bugs:
   [0.8.9] #28: Chokes on CSRG ISO
-  [     ] #21: Quadratic complexity when reading large entries
-  [sssss] #27: fuse.pc is fuse3.pc nowadays
-  [     ] #26: feature request: zstd support
-  [     ] #25: archivemount can't read .img.gz
-  [     ] #23: feature request: .xz compressed files support?
+  [  1  ] #21: Quadratic complexity when reading large entries
+  [  1  ] #27: fuse.pc is fuse3.pc nowadays
+  [xxxxx] #26: feature request: zstd support
+  [xxxxx] #25: archivemount can't read .img.gz
+  [lllll] #23: feature request: .xz compressed files support?
   [     ] #14: Create a table which shows supported formats && read / write support
-  [     ] #17: Update homepage in apt show archivemount
+  [ 1-1 ] #17: Update homepage in apt show archivemount
 PRs:
-  [sssss] #22: Add support for fuse3
-  [mmmmm] #20: Add support for /dev/fd/%u mountpoints
-  [sssss] #19: Don't fchdir at unmount when mounting read-only
-  [sssss] #18: Honor raw archives' pathname
+  [  1  ] #22: Add support for fuse3
+  [  1  ] #20: Add support for /dev/fd/%u mountpoints
+  [  1  ] #19: Don't fchdir at unmount when mounting read-only
+  [  1  ] #18: Honor raw archives' pathname
 
-x – fundamentally invalid; l – libarchive bug; ? – incoherent; s – superseded; m – merged
+x – fundamentally invalid; l – libarchive bug; ? – incoherent
 
 Write support
 -------------

@@ -83,6 +83,14 @@ typedef struct node {
 	bool modified;                /* true when node was modified */
 } NODE;
 
+// V1 UNIX-style caching: there's only one inode open, globally, at a time, at most
+// This still lets us service most reads linearly
+static struct {
+	NODE * node;
+	struct archive * archive;
+	off_t offset_in_archive_file; // -1 = not found; -2 = poison
+} last_open_node;
+
 
 struct options {
 	int readonly;
@@ -723,6 +731,10 @@ static int save(const char * archiveFile) {
 		lerrno();
 		return -errno;
 	}
+	if(last_open_node.archive) {
+		archive_read_free(last_open_node.archive);
+		last_open_node.archive = NULL;
+	}
 	close(archiveFd);
 	if(rename(archiveFile, oldfilename) == -1) {
 		int err        = errno;
@@ -893,7 +905,7 @@ static int _ar_open_raw(void)
 
 	int ret = -1;
 	const char * realpath;
-	NODE * node = firstchild(root)
+	NODE * node = firstchild(root);
 	log("_ar_open_raw called, path: '%s'", node->name);
 
 
@@ -916,7 +928,6 @@ static int _ar_open_raw(void)
 		log("archive_read_support_filter_all(): %s (%d)\n", archive_error_string(rawcache.archive), archive_ret);
 		return -EIO;
 	}
-
 	archive_ret = archive_read_support_format_raw(rawcache.archive);
 	if(archive_ret != ARCHIVE_OK) {
 		log("archive_read_support_format_raw(): %s (%d)\n", archive_error_string(rawcache.archive), archive_ret);
@@ -1029,9 +1040,7 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 		int fh;
 		fh = open(node->location, O_RDONLY);
 		if(fh == -1) {
-			log("Fatal error opening modified file '%s' at "
-			    "location '%s', giving up",
-			    path, node->location);
+			log("Fatal error opening modified file '%s' at location '%s', giving up", path, node->location);
 			return -errno;
 		}
 		/* copy data */
@@ -1043,32 +1052,37 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 		/* clean up */
 		close(fh);
 	} else {
-		struct archive * archive;
+		auto & archive = last_open_node.archive;
 		struct archive_entry * entry;
 		int archive_ret;
-		/* search file in archive */
-		realpath = archive_entry_pathname(node->entry);
-		if((archive = archive_read_new()) == NULL) {
+
+		if(last_open_node.node == node && last_open_node.offset_in_archive_file <= offset && last_open_node.offset_in_archive_file != -2)
+			goto ready;
+
+		log("reopening: last_open_node.node = %p; node = %p; last_open_node.offset_in_archive_file = %ld; offset = %ld", last_open_node.node, node,
+		    last_open_node.offset_in_archive_file, offset);
+		last_open_node.node = node;
+		last_open_node.offset_in_archive_file = -2;
+
+		if(archive) {
+			archive_read_free(archive);
+			lseek(archiveFd, 0, SEEK_SET);
+		}
+		archive = archive_read_new();
+		if(!archive) {
 			log("Out of memory");
 			return -ENOMEM;
 		}
+
 		archive_ret = archive_read_support_filter_all(archive);
 		if(archive_ret != ARCHIVE_OK) {
 			log("archive_read_support_filter_all(): %s (%d)\n", archive_error_string(archive), archive_ret);
 			return -EIO;
 		}
-		if(options.formatraw) {
-			archive_ret = archive_read_support_format_raw(archive);
-			if(archive_ret != ARCHIVE_OK) {
-				log("archive_read_support_format_all(): %s (%d)\n", archive_error_string(archive), archive_ret);
-				return -EIO;
-			}
-		} else {
-			archive_ret = archive_read_support_format_all(archive);
-			if(archive_ret != ARCHIVE_OK) {
-				log("archive_read_support_format_all(): %s (%d)\n", archive_error_string(archive), archive_ret);
-				return -EIO;
-			}
+		archive_ret = archive_read_support_format_all(archive);
+		if(archive_ret != ARCHIVE_OK) {
+			log("archive_read_support_format_all(): %s (%d)\n", archive_error_string(archive), archive_ret);
+			return -EIO;
 		}
 		if(options.password) {
 			if(archive_read_add_passphrase(archive, user_passphrase) != ARCHIVE_OK) {
@@ -1081,41 +1095,55 @@ static int _ar_read(const char * path, char * buf, size_t size, off_t offset, st
 			log("archive_read_open_fd(): %s (%d)\n", archive_error_string(archive), archive_ret);
 			return -EIO;
 		}
-		/* search for file to read */
-		while((archive_ret = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
-			const char * name;
-			name = archive_entry_pathname(entry);
-			if(strcmp(realpath, name) == 0) {
-				/* skip offset */
-				while(offset > 0) {
-					int skip = offset > (off_t)sizeof(temp_io_buf) ? (off_t)sizeof(temp_io_buf) : offset;
-					ret      = archive_read_data(archive, temp_io_buf, skip);
-					if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
-						log("ar_read (skipping offset): %s", archive_error_string(archive));
-						errno = archive_errno(archive);
-						ret   = -1;
-						break;
-					}
-					offset -= skip;
-				}
-				if(offset) {
-					/* there was an error */
+
+		last_open_node.offset_in_archive_file = -1;
+
+	ready:
+		if(last_open_node.offset_in_archive_file == -1) {
+			log("skipping");
+			realpath = archive_entry_pathname(node->entry);
+
+			/* search for file to read */
+			while((archive_ret = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
+				const char * name;
+				name = archive_entry_pathname(entry);
+				if(strcmp(realpath, name) == 0) {
+					last_open_node.offset_in_archive_file = 0;
 					break;
 				}
-				/* read data */
-				ret = archive_read_data(archive, buf, size);
-				if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
-					log("ar_read (reading data): %s", archive_error_string(archive));
-					errno = archive_errno(archive);
-					ret   = -1;
-				}
+				archive_read_data_skip(archive);
+			}
+		}
+
+		// we know last_open_node.offset_in_archive_file < offset (otherwise we reopened)
+		offset -= last_open_node.offset_in_archive_file;
+
+		/* skip offset */
+		while(offset > 0) {
+			int skip = offset > (off_t)sizeof(temp_io_buf) ? (off_t)sizeof(temp_io_buf) : offset;
+			ret      = archive_read_data(archive, temp_io_buf, skip);
+			if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
+				log("ar_read (skipping offset): %s", archive_error_string(archive));
+				errno = archive_errno(archive);
+				ret   = -1;
 				break;
 			}
-			archive_read_data_skip(archive);
+			offset -= skip;
+			last_open_node.offset_in_archive_file += skip;
 		}
-		/* close archive */
-		archive_read_free(archive);
-		lseek(archiveFd, 0, SEEK_SET);
+		if(offset)
+			goto err;
+
+		/* read data */
+		ret = archive_read_data(archive, buf, size);
+		if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
+		err:
+			log("ar_read (reading data): %s", archive_error_string(archive));
+			errno                                 = archive_errno(archive);
+			last_open_node.offset_in_archive_file = -2;
+			ret                                   = -1;
+		} else
+			last_open_node.offset_in_archive_file += ret;
 	}
 	return ret;
 }
@@ -2087,14 +2115,11 @@ static int ar_open(const char * path, struct fuse_file_info * fi) {
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
-	if(fi->flags & O_WRONLY || fi->flags & O_RDWR) {
-		if(!archiveWriteable) {
-			pthread_mutex_unlock(&lock);
-			return -EROFS;
-		}
+	if((fi->flags & O_ACCMODE) != O_RDONLY && !archiveWriteable) {
+		pthread_mutex_unlock(&lock);
+		return -EROFS;
 	}
 	/* no need to recurse into links since function doesn't do anything */
-	/* no need to save a handle here since archives are stream based */
 	fi->fh = 0;
 	if(options.formatraw)
 		_ar_open_raw();
@@ -2329,7 +2354,6 @@ int main(int argc, char ** argv) {
 		tcsetattr(STDIN_FILENO, TCSANOW, &orig);
 	}
 
-
 	if(options.formatraw)
 		options.readonly = true;
 	if(options.readonly) {
@@ -2374,6 +2398,8 @@ int main(int argc, char ** argv) {
 	 * multithreading is broken with libarchive :-(
 	 */
 	fuse_opt_add_arg(&args, "-s");
+	fuse_opt_add_arg(&args, "-o");
+	fuse_opt_add_arg(&args, "default_permissions");
 
 	fuse_main(args.argc, args.argv, &ar_oper, NULL);
 

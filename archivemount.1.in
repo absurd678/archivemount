@@ -88,9 +88,9 @@ Implies
 .
 .It Fl o Cm formatraw
 .Ar archive
-is actually a file, exposed verbatim
-.Em but uncompressed
-as
+is actually a compressed file, made available under
+.Ar mounpoint Ns Pa / Ns Ar saved.filename
+or
 .Ar mounpoint Ns Pa /data .
 Implies
 .Fl o Cm readonly .
