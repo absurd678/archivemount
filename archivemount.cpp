@@ -25,6 +25,7 @@
 
 #define BLOCK_SIZE 10240
 
+#include <algorithm>
 #include <archive.h>
 #include <archive_entry.h>
 #include <dirent.h>
@@ -437,12 +438,15 @@ static int build_tree(mode_t mtpt_mode) {
 			lerrno();
 			return -errno;
 		}
-		auto len = strlen(cur->name) - 1;
+		auto len = strlen(cur->name);
+		len = std::unique(cur->name, cur->name + len, [](char l, char r) {
+			return l == '/' && r == '/';
+		}) - cur->name;
+		if(cur->name[len - 1] == '/')
+			--len;
+		cur->name[len] = '\0';
 		if(len > 0) {
 			/* remove trailing '/' for directories */
-			if(cur->name[len] == '/') {
-				cur->name[len] = '\0';
-			}
 			cur->basename = strrchr(cur->name, '/') + 1;
 
 			/* references */
@@ -452,8 +456,7 @@ static int build_tree(mode_t mtpt_mode) {
 				return -ENOENT;
 			}
 		} else {
-			/* this is the directory the subtree filter matches,
-			   do not respect it */
+			/* this is the directory the subtree filter matches, or a root directory, do not respect it */
 		}
 
 		if((cur = init_node()) == NULL) {
