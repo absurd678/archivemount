@@ -31,7 +31,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
+#if __has_include(<fuse_lowlevel.h>)
 #include <fuse_lowlevel.h>
+#endif
 #include <fuse_opt.h>
 #include <grp.h>
 #include <map>
