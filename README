@@ -6,8 +6,8 @@ archive (as in .tar.gz or .zip or .iso) and use it like an ordinary filesystem.
 
 Requirements
 ------------
-You will need GNU Make, libarchive-dev, libfuse3-dev, and pkgconf
-(or just the libraries and fix up cc *.c manually).
+You will need GNU Make, libarchive-dev, libfuse3-dev/libfuse-dev, and pkgconf
+(or just the libraries and fix up c++ *.cpp manually).
 
 -ng
 ------------
