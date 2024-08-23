@@ -11,9 +11,10 @@ You will need GNU Make, libarchive-dev, libfuse3-dev/libfuse-dev, and pkgconf
 
 -ng
 ------------
-https://builds.sr.ht/~nabijaczleweli/archivemount-ng
+https://git.sr.ht/~nabijaczleweli/archivemount-ng
 https://todo.sr.ht/~nabijaczleweli/archivemount-ng  (report at <mailto:~nabijaczleweli/archivemount-ng@todo.sr.ht>)
 https://lists.sr.ht/~nabijaczleweli/archivemount-ng <mailto:~nabijaczleweli/archivemount-ng@lists.sr.ht>
+https://builds.sr.ht/~nabijaczleweli/archivemount-ng
 
 The upstream author died irl in 2020 (cf. obituary in https://github.com/cybernoid/archivemount/issues/29).
 This encompasses the upstream tarballs and, at least, fixes the following issues.
