@@ -56,6 +56,10 @@ using namespace std::literals;
 #define lerrnum(err) lerr("%s", strerror(err))
 #define lerrno() lerrnum(errno)
 
+#if __APPLE__
+#define st_mtim st_mtimespec
+#endif
+
 
 typedef struct node {
 	// ^ must be first
