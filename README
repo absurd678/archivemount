@@ -82,5 +82,5 @@ Release signing
 Release tarballs are signed with nabijaczleweli@nabijaczleweli.xyz
   (pull with WKD, but 7D69 474E 8402 8C5C C0C4  4163 BCFD 0B01 8D26 58F1).
 аnd stored in git notes as-if via the example program provided at
-  https://man.sr.ht/git.sr.ht/#signing-tagsx27-tarballs
+  https://man.sr.ht/git.sr.ht/#signing-tags-tarballs
 and are thus available on the refs listing/tag page as .tar.gz.asc.
