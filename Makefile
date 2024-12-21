@@ -14,7 +14,7 @@ PREFIX ?= /usr/local
 
 ADD_L    := $(shell $(PKG_CONFIG) --cflags libarchive 2>/dev/null)                 $(shell for p in $(FUSES); do $(PKG_CONFIG) --cflags $$p && exit; done 2>/dev/null) -O3 -g -Wall -Wextra
 
-CPPFLAGS += -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -DVERSION='"$(VERSION)"' $(if $(DEBUG),,-DNDEBUG)
+CPPFLAGS += -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D__STDC_FORMAT_MACROS -DVERSION='"$(VERSION)"' $(if $(DEBUG),,-DNDEBUG)
 CFLAGS   += $(ADD_L)
 CXXFLAGS += $(ADD_L) -fno-exceptions -fno-rtti -Wno-missing-field-initializers -std=c++2b  # c++23 isn't understood by everyone
 LDLIBS   += $(shell $(PKG_CONFIG) --libs libarchive 2>/dev/null || echo -larchive) $(shell for p in $(FUSES); do $(PKG_CONFIG) --libs $$p && exit; done 2>/dev/null; echo -l$(firstword $(FUSES)))

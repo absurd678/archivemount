@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <archive.h>
 #include <archive_entry.h>
+#include <cinttypes>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
