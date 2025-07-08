@@ -1,0 +1,169 @@
+.\" SPDX-License-Identifier: LGPL-2.0-or-later
+.\"
+.Dd июня 17, 2024
+.ds doc-volume-operating-system
+.Dt ARCHIVEMOUNT 1
+.Os archivemount-ng 
+.
+.Sh NAME
+.Nm archivemount
+.Nd mount an archive for access as a filesystem
+.Sh SYNOPSIS
+.Nm
+.Op Fl hVdf
+.Oo Fl o Ar option Ns Oo , Ns Ar option Oc Ns … Oc Ns …
+.Ar archive
+.Ar mountpoint
+.
+.Sh DESCRIPTION
+Mounts, through
+.Xr fuse 8 ,
+a file tree contained in
+.Ar archive
+on directory
+.Ar mountpoint .
+.ie t .br
+.Nm umount
+and
+.Nm fusermount Fl u
+can undo this mapping.
+.
+.Sh EXAMPLES
+.ie t \{ .
+.mk
+.Bd -literal -compact -offset 42n
+.Li $ Nm tar Fl tf Pa voreutils.tar.gz
+src/            src/…
+man/            man/aliases      man/basename.1
+README.md
+.Li $ Nm Fl o Cm subtree Ns = Ns Ar man Li \e
+.Li " " "            " Pa voreutils.tar.gz mnt
+.Li $ Nm ls Pa mnt
+aliases         basename.1       …
+.Ed
+.rt
+.Bd -literal -compact
+.Li $ Nm ls
+files.tar.gz    mnt/
+.Li $ Nm tar Fl tf Pa files.tar.gz
+file1           file2
+.Li $ Nm Pa files.tar.gz mnt
+.Li $ Nm ls Pa mnt
+file1           file2
+.Li $ Ic echo Li zupa > Pa mnt/file3
+.Li $ Nm rm Pa mnt/file1
+.Li $ Nm umount Pa mnt
+.Li $ Nm ls
+files.tar.gz    files.tar.gz.orig       mnt/
+.Li $ Nm tar Fl tf Pa files.tar.gz
+file2           file3
+.Ed
+. \}
+.el \{ .
+.Bd -literal -compact
+.Li $ Nm ls
+files.tar.gz    mnt/
+.Li $ Nm tar Fl tf Pa files.tar.gz
+file1           file2
+.Li $ Nm Pa files.tar.gz mnt
+.Li $ Nm ls mnt
+file1           file2
+.Li $ Ic echo Li zupa > Pa mnt/file3
+.Li $ Nm rm Pa mnt/file1
+.Li $ Nm umount Pa mnt
+.Li $ Nm ls
+files.tar.gz    files.tar.gz.orig       mnt/
+.Li $ Nm tar Fl tf Pa files.tar.gz
+file2           file3
+.Ed
+.Pp
+.Bd -literal -compact
+.Li $ Nm tar Fl tf Pa voreutils.tar.gz
+src/            src/…
+man/            man/aliases              man/basename.1
+README.md
+.Li $ Nm Fl o Cm subtree Ns = Ns Ar man Pa voreutils.tar.gz mnt
+.Li $ Nm ls Pa mnt
+aliases         basename.1
+.Ed
+. \}
+.
+.Sh OPTIONS
+See
+.Xr fuse 8
+for a complete list of the baseline FUSE options supported.
+.if t .br
+The following options are handled specially by
+.Nm :
+.Bl -tag -compact -width ".Fl o Cm subtree Ns = Ns Ar regex"
+.It Fl h , -help
+Write usage and all available options to standard error stream, then exit.
+.
+.It Fl V , -version
+Write version of
+.Nm ,
+libarchive,
+and FUSE to the standard output stream, then exit.
+.Pp
+.
+.It Fl r , Fl o Cm ro , Fl o Cm readonly Ns : Disable writes entirely.
+.
+.It Fl o Cm password
+Prompt for archive passphrase.
+.
+.It Fl o Cm nobackup
+When saving writes, the original
+.Ar archive
+is moved to
+.Qq Ar archive Ns Li .orig .
+This flag removes that file afterward.
+.
+.It Fl o Cm nosave
+Allow writes in memory, but don't actually write them out on unmount.
+.Pp
+.
+.It Fl o Cm subtree Ns = Ns Ar regex
+Hide files not matching
+.Ar regex ,
+and on those that do match, remove the matched prefix (cf. second example above).
+.Ar regex
+is a basic regular expression that behaves as-if prepended with the equivalent of
+.Qq Li \(ha.? .
+Implies
+.Fl r .
+.
+.It Fl o Cm formatraw
+.Ar archive
+is actually a compressed file, made available under
+.Ar mounpoint Ns Pa / Ns Ar saved-filename
+or
+.Ar mounpoint Ns Pa /data .
+Implies
+.Fl r .
+.El
+.
+.Sh BUGS
+Writing archives, probably.
+.
+.Sh ARCHIVE FORMATS
+See
+.Xr libarchive 3
+for a definitive list, but
+all kinds of
+.Nm tar Ns / Ns No ustar Ns / Ns Nm pax Ns / Ns Nm cpio
+archives, 7-Zip, ISO9660,
+.Nm ar ,
+and RAR/Zip may be read.
+These may be compressed with
+.Xr gzip 1 ,
+.Xr xz 1 ,
+.Xr zstd 1 ,
+&c. and are processed transparently.
+The same applies for writing (except you can't write RARs).
+.
+.Sh SEE ALSO
+.Xr fusermount 1 ,
+.Xr libarchive 3 ,
+.Xr regex 7 ,
+.Xr fuse 8 ,
+.Xr umount 8

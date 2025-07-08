@@ -46,6 +46,10 @@
 #include <unistd.h>
 #include <utime.h>
 #include <wchar.h>
+
+
+
+#include <iostream>
 using namespace std::literals;
 
 #ifdef NDEBUG
@@ -102,7 +106,8 @@ enum {
 	KEY_HELP,
 };
 
-#define AR_OPT(t, p, v) {t, offsetof(struct options, p), v}
+#define AR_OPT(t, p, v) {t, offsetof(struct options, p), v}		// Определяет шаблон, смещение в структуре 
+// и дефолтное значение аргумента команды archivemount
 
 static const struct fuse_opt ar_opts[] = {AR_OPT("readonly", readonly, 1),
                                           AR_OPT("-r", readonly, 1),
@@ -124,15 +129,15 @@ static bool archiveModified;
 static bool archiveWriteable;
 static NODE * root;
 static FORMATRAW_CACHE rawcache;
-static struct options options;
-static const char * mtpt;
-static const char * archiveFile;
+static struct options options;		// доступные опции работы
+static const char * mtpt;		// Путь к точке монтирования 
+static const char * archiveFile;		// Путь к архиву каталога
 static char * user_passphrase;
 static uint64_t archiveFileSize;
 static pthread_mutex_t lock; /* global node tree lock */
 
 
-static void usage(const char * progname) {
+static void usage(const char * progname) { // Y
 	fprintf(stderr,
 	        "usage: %s archivepath mountpoint [options]\n"
 	        "\n"
@@ -159,26 +164,82 @@ static void usage(const char * progname) {
 	        progname);
 }
 
-static int ar_opt_proc(void *, const char * arg, int key, struct fuse_args * outargs) {
+void print_tree(const NODE* node, 
+	const std::string& prefix = "", 
+	bool is_last = true,
+	bool is_root = true) // I
+{
+// Определяем префикс для текущего узла
+std::string connector;
+std::string current_prefix;
+
+if (!is_root) {
+connector = is_last ? "└── " : "├── ";
+current_prefix = prefix + (is_last ? "    " : "│   ");
+} else {
+// Особый случай для корневого узла
+connector = "";
+current_prefix = prefix;
+}
+
+// Выводим имя текущего узла
+if (node->basename.empty() && is_root) {
+std::cout << prefix << connector << "/" << std::endl;
+} else {
+std::cout << prefix << connector << node->basename;
+
+// Добавляем маркеры изменений
+if (node->modified) std::cout << " [M]";
+if (node->namechanged) std::cout << " [R]";
+if (node->location) std::cout << " [D]";
+std::cout << std::endl;
+}
+
+// Рекурсивный обход детей
+auto it = node->children.begin();
+const auto end = node->children.end();
+
+while (it != end) {
+auto next = it;
+++next;
+
+// Рекурсивный вызов для дочерних узлов
+print_tree(
+it->second, 
+current_prefix,
+next == end,
+false
+);
+
+it = next;
+}
+}
+
+static int ar_opt_proc(void *, const char * arg, int key, struct fuse_args * outargs) { /// Y
 	struct fuse_operations faux_oper;
 	switch(key) {
 		case FUSE_OPT_KEY_OPT:
+			printf("FUSE_OPT_KEY_OPT");
 			return 1;
 
 		case FUSE_OPT_KEY_NONOPT:
 			if(!archiveFile) {
 				archiveFile = arg;
+				printf("FUSE_OPT_KEY_NONOPT !archiveFile");
 				return 0;
 			} else if(!mtpt) {
 				mtpt = arg;
+				printf("FUSE_OPT_KEY_NONOPT !mtpt");
 				return 1;
 			} else {
 				usage(outargs->argv[0]);
+				printf("FUSE_OPT_KEY_NONOPT else");
 				exit(1);
 			}
 
 		case KEY_HELP:
 			usage(outargs->argv[0]);
+			printf("KEY_HELP");
 			exit(0);
 
 		case KEY_VERSION:
@@ -192,7 +253,7 @@ static int ar_opt_proc(void *, const char * arg, int key, struct fuse_args * out
 	}
 }
 
-static NODE * init_node() {
+static NODE * init_node() { // Y
 	NODE * node;
 
 	if((node = (NODE *)malloc(sizeof(NODE))) == NULL) {
@@ -212,7 +273,7 @@ static NODE * init_node() {
 	return node;
 }
 
-static void free_node(NODE * node) {
+static void free_node(NODE * node) { // Y
 	free(node->name);
 	archive_entry_free(node->entry);
 	node->~node();
@@ -220,7 +281,7 @@ static void free_node(NODE * node) {
 }
 
 
-static void remove_child(NODE * node) {
+static void remove_child(NODE * node) { // Y
 	if(node->parent) {
 		node->parent->children.erase(node->basename);
 		log("removed '%s' from parent '%s'", node->name, node->parent->name);
@@ -229,7 +290,7 @@ static void remove_child(NODE * node) {
 	}
 }
 
-static void insert_as_child(NODE * node, NODE * parent) {
+static void insert_as_child(NODE * node, NODE * parent) { // Y
 	node->parent = parent;
 	parent->children.insert({node->basename, node});
 	log("inserted '%s' as child of '%s'", node->name, parent->name);
@@ -240,7 +301,7 @@ static void insert_as_child(NODE * node, NODE * parent) {
  * specified in node->name
  * @return 0 on success, 0-errno else (ENOENT or ENOTDIR)
  */
-static int insert_by_path(NODE * root, NODE * node) {
+static int insert_by_path(NODE * root, NODE * node) { // Y?
 	char * temp;
 	NODE * cur = root;
 	char * key = node->name;
@@ -300,7 +361,7 @@ static int insert_by_path(NODE * root, NODE * node) {
 	return 0;
 }
 
-static bool archive_prepopen(struct archive * archive) {
+static bool archive_prepopen(struct archive * archive) { // Y
 	if(archive_read_support_filter_all(archive) != ARCHIVE_OK) {
 	err:
 		lerr("%s", archive_error_string(archive));
@@ -315,18 +376,18 @@ static bool archive_prepopen(struct archive * archive) {
 	return true;
 }
 
-static uint64_t total_entry_size_in_archive(NODE * node = root) {
+static uint64_t total_entry_size_in_archive(NODE * node = root) { // Y?
 	uint64_t ret = node->entry_size_in_archive;
 	for(auto && [_, child] : node->children)
 		ret += total_entry_size_in_archive(child);
 	return ret;
 }
-static void redistribute_entry_size_in_archive(double scale, NODE * node = root) {
+static void redistribute_entry_size_in_archive(double scale, NODE * node = root) { // Y?
 	node->entry_size_in_archive = node->entry_size_in_archive * scale;
 	for(auto && [_, child] : node->children)
 		redistribute_entry_size_in_archive(scale, child);
 }
-static int build_tree(mode_t mtpt_mode) {
+static int build_tree(mode_t mtpt_mode) { // Y
 	struct archive * archive;
 	struct stat st;
 	int format;
@@ -396,9 +457,11 @@ static int build_tree(mode_t mtpt_mode) {
 	}
 
 	/* read all entries in archive, create node for each */
-	off_t pos = archive_read_header_position(archive), *lastpos{};
-	while(archive_read_next_header2(archive, cur->entry) == ARCHIVE_OK) {
+	off_t pos = archive_read_header_position(archive), *lastpos{};		// Инициализация смещения по первому заголовку
+	printf("\npos = %d\n", pos);
+	while(archive_read_next_header2(archive, cur->entry) == ARCHIVE_OK) {		// Пока можно прочитать заголовок следующего элемента
 		off_t curpos = archive_read_header_position(archive);
+		printf("\ncurpos = %d\n", curpos);
 		if(lastpos)
 			*lastpos = curpos - pos;
 		lastpos = &cur->entry_size_in_archive;
@@ -433,6 +496,7 @@ static int build_tree(mode_t mtpt_mode) {
 			lerrno();
 			return -errno;
 		}
+		//printf("\n cur->name: %s\n", cur->name);
 		auto len = strlen(cur->name);
 		len      = std::unique(cur->name, cur->name + len, [](char l, char r) { return l == '/' && r == '/'; }) - cur->name;
 		if(cur->name[len - 1] == '/')
@@ -451,6 +515,8 @@ static int build_tree(mode_t mtpt_mode) {
 				lerr("ERROR: could not insert %s into tree: %s", cur->name, strerror(-err));
 				return -ENOENT;
 			}
+			printf("\nroot->children: \n");
+			print_tree(root);
 
 			if((cur = init_node()) == NULL)
 				return -ENOMEM;
@@ -505,11 +571,11 @@ static void correct_hardlinks_to_node(const char * old_name, const char * new_na
 	}
 }
 
-static NODE * firstchild(NODE * node) {
+static NODE * firstchild(NODE * node) { // Y?
 	return std::begin(node->children)->second;
 }
 
-static void correct_name_in_entry(NODE * node) {
+static void correct_name_in_entry(NODE * node) { //
 	if(!root->children.empty() && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
 		log("correcting name in entry to '%s'", node->name + 1);
 		archive_entry_set_pathname(node->entry, node->name + 1);
@@ -519,7 +585,7 @@ static void correct_name_in_entry(NODE * node) {
 	}
 }
 
-static NODE * get_node_for_path(NODE * start, const char * path) {
+static NODE * get_node_for_path(NODE * start, const char * path) { // Y?
 	// log("get_node_for_path path: '%s' start: '%s'", path, start->name);
 
 	/* Check if start is a perfect match */
@@ -720,7 +786,7 @@ static void write_new_modded_file(NODE * node, struct archive_entry * wentry, st
 	node->modified = false;
 }
 
-static int save(const char * archiveFile) {
+static int save(const char * archiveFile) { // Y?
 	struct archive * oldarc;
 	struct archive * newarc;
 	struct archive_entry * entry;
@@ -884,7 +950,7 @@ static int save(const char * archiveFile) {
 }
 
 // Kill temporary files
-static void nosave(NODE * node = root) {
+static void nosave(NODE * node = root) { // Y?
 	if(node->location) {
 		auto st = archive_entry_stat(node->entry);
 		if(S_ISDIR(st->st_mode)) {
@@ -910,7 +976,7 @@ static void _ar_open_raw()
 //_ar_open_raw(const char *path, struct fuse_file_info *fi)
 {
 	// open archive and search first entry
-
+	printf("_ar_open_raw IS CALLABLE!");
 	NODE * node = firstchild(root);
 	log("_ar_open_raw called, path: '%s'", node->name);
 
@@ -936,8 +1002,10 @@ static void _ar_open_raw()
 	const char * realpath = archive_entry_pathname(node->entry);
 	/* search for file to read - "/data" must be the first entry */
 	while((archive_ret = archive_read_next_header(last_open_node.archive, &entry)) == ARCHIVE_OK)
-		if(strcmp(realpath, archive_entry_pathname(entry)) == 0)
+		if(strcmp(realpath, archive_entry_pathname(entry)) == 0){
+			printf("_ar_open_raw | realpath = %s", realpath); // I
 			break;
+		}
 
 	last_open_node.offset_in_archive_file = 0;
 }
@@ -1220,7 +1288,8 @@ static int ar_mkdir(const char * path, mode_t mode) {
 	NODE * node;
 	char * location;
 	int tmp;
-
+	printf("\nar_mkdir callable!\n");
+	
 	log("ar_mkdir called, path '%s', mode %o", path, mode);
 	if(!archiveWriteable || options.readonly) {
 		return -EROFS;
@@ -2229,14 +2298,14 @@ int main(int argc, char ** argv) {
 		return (1);
 	}
 	// https://github.com/libfuse/libfuse/commit/64e11073b9347fcf9c6d1eea143763ba9e946f70
-	if(!strncmp(mtpt, "/dev/fd/", sizeof("/dev/fd/") - 1))
-		st.st_mode = (st.st_mode & ~S_IFMT) | S_IFDIR;
-	else if(!S_ISDIR(st.st_mode)) {
+	if(!strncmp(mtpt, "/dev/fd/", sizeof("/dev/fd/") - 1))	// mtpt имеет вид /dev/fd/N то 
+		st.st_mode = (st.st_mode & ~S_IFMT) | S_IFDIR; //  заставляем линукс думать что это директория
+	else if(!S_ISDIR(st.st_mode)) {		// Иначе проверяем чтоб mtpt был директорией
 		lerr("%s: %s", mtpt, strerror(ENOTDIR));
 		return (1);
 	}
 
-	if(options.password) {
+	if(options.password) { // Пока не оч разбирал 
 		struct termios orig = noEcho();
 		fputs("Enter passphrase: ", stderr);
 		size_t user_passphrase_size;
@@ -2248,7 +2317,7 @@ int main(int argc, char ** argv) {
 	if(options.formatraw)
 		options.readonly = true;
 	if(options.readonly)
-		fuse_opt_add_arg(&args, "-r");
+		fuse_opt_add_arg(&args, "-r");	// Не разбирал
 	else
 		archiveWriteable = options.nosave || (access(archiveFile, W_OK) == 0);
 
@@ -2272,18 +2341,18 @@ int main(int argc, char ** argv) {
 #endif
 	/* save directory this was started from */
 	if(!options.readonly && !options.nosave)
-		oldwd = open(".", O_PATH | O_CLOEXEC);
+		oldwd = open(".", O_PATH | O_CLOEXEC);		// Открывают текущую директорию, но зачем?
 
 	/* Initialize the node tree lock */
 	pthread_mutex_init(&lock, NULL);
 
 	/* always use fuse in single-threaded mode
-	 * multithreading is broken with libarchive :-(
+	 * multithreading is broken with libarchive :-( LOL
 	 */
 	fuse_opt_add_arg(&args, "-s");
 	fuse_opt_add_arg(&args, "-o");
 	fuse_opt_add_arg(&args, "default_permissions");
-
+	
 	fuse_main(args.argc, args.argv, &ar_oper, NULL);
 
 	/* save changes if modified; must be in original directory (libarchive can chdir) */
