@@ -1,38 +1,45 @@
 # SPDX-License-Identifier: 0BSD
 
-
 CC ?= cc
 CXX ?= c++
 PKG_CONFIG ?= pkg-config
 FUSES ?= fuse3 fuse
 VERSION ?= $(shell git describe)
-DATE_EPOCH = date $(shell date -d @0 > /dev/null 2>&1 && echo "-d @" || echo "-r ")
-SOURCE_DATE_EPOCH ?= $(shell git log -1 --no-show-signature --format=%at "archivemount.1.in")
-MANUAL_DATE ?= $(shell $(DATE_EPOCH)$(SOURCE_DATE_EPOCH) +"%B %e, %Y")
 PREFIX ?= /usr/local
 
+# Определение целевого бинарного файла
+TARGET = AuroraService
 
-ADD_L    := $(shell $(PKG_CONFIG) --cflags libarchive 2>/dev/null)                 $(shell for p in $(FUSES); do $(PKG_CONFIG) --cflags $$p && exit; done 2>/dev/null) -O3 -g -Wall -Wextra
+# Флаги для libarchive и FUSE
+ADD_L := $(shell $(PKG_CONFIG) --cflags libarchive 2>/dev/null) \
+         $(shell for p in $(FUSES); do $(PKG_CONFIG) --cflags $$p && exit; done 2>/dev/null) \
+         -O3 -g -Wall -Wextra
 
+# Флаги препроцессора и компилятора
 CPPFLAGS += -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D__STDC_FORMAT_MACROS -DVERSION='"$(VERSION)"' $(if $(DEBUG),,-DNDEBUG)
-CFLAGS   += $(ADD_L)
-CXXFLAGS += $(ADD_L) -fno-exceptions -fno-rtti -Wno-missing-field-initializers -std=c++2b  # c++23 isn't understood by everyone
-LDLIBS   += $(shell $(PKG_CONFIG) --libs libarchive 2>/dev/null || echo -larchive) $(shell for p in $(FUSES); do $(PKG_CONFIG) --libs $$p && exit; done 2>/dev/null; echo -l$(firstword $(FUSES)))
+CXXFLAGS += $(ADD_L) -fno-exceptions -fno-rtti -Wno-missing-field-initializers -std=c++2b
 
+# Флаги линковщика
+LDLIBS += $(shell $(PKG_CONFIG) --libs libarchive 2>/dev/null || echo -larchive) \
+          $(shell for p in $(FUSES); do $(PKG_CONFIG) --libs $$p && exit; done 2>/dev/null; echo -l$(firstword $(FUSES)))
 
-.PHONY: all check clean install
+# Исходные файлы
+SRCS = AuroraService.cpp
+OBJS = $(SRCS:.cpp=.o)
 
-all: archivemount archivemount.1
+.PHONY: all clean install
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
+
+%.o: %.cpp archivemount.hpp
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<
+
 clean:
-	rm -rf archivemount archivemount.1
-check: archivemount
-	./test
+	rm -f $(TARGET) $(OBJS)
 
-
-install: all
-	mkdir -p $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/man/man1
-	cp archivemount $(DESTDIR)$(PREFIX)/bin
-	cp archivemount.1 $(DESTDIR)$(PREFIX)/share/man/man1
-
-archivemount.1: archivemount.1.in
-	awk '{ gsub(/ \^/, " \\(ha"); gsub(/ ~/, " \\(ti"); if($$1 == ".Dd") $$2 = "$(MANUAL_DATE)"; if($$1 == ".Dt") print ".ds doc-volume-operating-system"; if($$1 == ".Os") $$2 = "archivemount-ng $(VERSION)"; print}' < $< > $@
+install: $(TARGET)
+	mkdir -p $(DESTDIR)$(PREFIX)/bin
+	cp $(TARGET) $(DESTDIR)$(PREFIX)/bin

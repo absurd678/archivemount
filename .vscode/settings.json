@@ -5,5 +5,8 @@
             "binaryPath": "/home/artem/dev/projects/archivemount/archivemount",
             "binaryArgs": []
         }
-    ]
+    ],
+    "files.associations": {
+        "iostream": "cpp"
+    }
 }

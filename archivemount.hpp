@@ -2275,7 +2275,13 @@ static ssize_t getPassphrase(char ** lineptr, size_t * n, FILE * stream) {
 	return ret;
 }
 
-int main(int argc, char ** argv) {
+class Archivemounter{
+
+public:
+Archivemounter (){}
+~Archivemounter(){}
+
+int doArchivemount(int argc, char ** argv){		// Это был main
 	struct stat st;
 	int oldwd             = -1;
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
@@ -2366,4 +2372,15 @@ int main(int argc, char ** argv) {
 
 		nosave();
 	}
+
+	return 0;
 }
+};
+/*
+int main(int argc, char ** argv) {
+	Archivemounter a{};
+
+	if (a.doArchivemount(argc, argv) != 0) 
+		std::cout<<"Something went wrong"<<std::endl;
+}
+*/
