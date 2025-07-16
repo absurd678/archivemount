@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: 0BSD
+# SPDX-License-Identifier: 0BSD СТАРЫЙ ЕГО НАДО ЗАНОВО СДЕЛАТЬ
 
 CC ?= cc
 CXX ?= c++
