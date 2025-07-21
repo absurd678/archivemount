@@ -1,0 +1,1 @@
+/usr/lib/ccache/g++ -g CMakeFiles/ArchiveFS.dir/mainCode/main.cpp.o CMakeFiles/ArchiveFS.dir/src/ArchiveFS.cpp.o CMakeFiles/ArchiveFS.dir/src/FuseWrapper.cpp.o -o ArchiveFS  -larchive -lfuse3 -lpthread

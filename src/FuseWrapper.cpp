@@ -1,36 +1,178 @@
 #include "FuseWrapper.hpp"
 
-FuseWrapper::FuseWrapper(ArchiveFS& fs) (fs);
+//----------------------Статические функции-обертки-------------------------------
+// Общий макрос для получения экземпляра класса
+#define GET_SELF() static_cast<FuseWrapper*>(fuse_get_context()->private_data)
+
+
+
+int FuseWrapper::static_getattr(const char* path, struct stat* stbuf, struct fuse_file_info* fi) {
+    return GET_SELF()->ar_getattr(path, stbuf, fi);
+}
+
+int FuseWrapper::static_readlink(const char* path, char* buf, size_t size) {
+    return GET_SELF()->ar_readlink(path, buf, size);
+}
+
+int FuseWrapper::static_mknod(const char* path, mode_t mode, dev_t rdev) {
+    return GET_SELF()->ar_mknod(path, mode, rdev);
+}
+
+int FuseWrapper::static_mkdir(const char* path, mode_t mode) {
+    return GET_SELF()->ar_mkdir(path, mode);
+}
+
+int FuseWrapper::static_unlink(const char* path) {
+    return GET_SELF()->ar_unlink(path);
+}
+
+int FuseWrapper::static_rmdir(const char* path) {
+    return GET_SELF()->ar_rmdir(path);
+}
+
+int FuseWrapper::static_symlink(const char* from, const char* to) {
+    return GET_SELF()->ar_symlink(from, to);
+}
+
+int FuseWrapper::static_rename(const char* from, const char* to, unsigned int flags) {
+    return GET_SELF()->ar_rename(from, to, flags);
+}
+
+int FuseWrapper::static_link(const char* from, const char* to) {
+    return GET_SELF()->ar_link(from, to);
+}
+
+int FuseWrapper::static_chmod(const char* path, mode_t mode, struct fuse_file_info* fi) {
+    return GET_SELF()->ar_chmod(path, mode, fi);
+}
+
+int FuseWrapper::static_chown(const char* path, uid_t uid, gid_t gid, struct fuse_file_info* fi) {
+    return GET_SELF()->ar_chown(path, uid, gid, fi);
+}
+
+int FuseWrapper::static_truncate(const char* path, off_t size, struct fuse_file_info* fi) {
+    return GET_SELF()->ar_truncate(path, size, fi);
+}
+
+int FuseWrapper::static_open(const char* path, struct fuse_file_info* fi) {
+    return GET_SELF()->ar_open(path, fi);
+}
+
+int FuseWrapper::static_read(const char* path, char* buf, size_t size, off_t offset, struct fuse_file_info* fi) {
+    return GET_SELF()->ar_read(path, buf, size, offset, fi);
+}
+
+int FuseWrapper::static_write(const char* path, const char* buf, size_t size, off_t offset, struct fuse_file_info* fi) {
+    return GET_SELF()->ar_write(path, buf, size, offset, fi);
+}
+
+int FuseWrapper::static_statfs(const char* path, struct statvfs* stbuf) {
+    return GET_SELF()->ar_statfs(path, stbuf);
+}
+
+int FuseWrapper::static_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info* fi, fuse_readdir_flags fr) {
+    return GET_SELF()->ar_readdir(path, buf, filler, offset, fi, fr);
+}
+
+int FuseWrapper::static_create(const char* path, mode_t mode, struct fuse_file_info* fi) {
+    return GET_SELF()->ar_create(path, mode, fi);
+}
+
+int FuseWrapper::static_utimens(const char* path, const struct timespec tv[2], struct fuse_file_info* fi) {
+    return GET_SELF()->ar_utimens(path, tv, fi);
+}
+
+int FuseWrapper::static_opt_proc(void* data, const char* arg, int key, struct fuse_args* outargs) {
+    return static_cast<FuseWrapper*>(data)->ar_opt_proc(data, arg, key, outargs);
+}
+
+//------------------------------Нормальные методы...-------------------------------
+
+const fuse_opt FuseWrapper::ar_opts[] = {
+	AR_OPT("readonly", readonly, 1),
+	AR_OPT("-r", readonly, 1),
+	AR_OPT("password", password, 1),
+	AR_OPT("nobackup", nobackup, 1),
+	AR_OPT("nosave", nosave, 1),
+	AR_OPT("subtree=%s", subtree_filter, 1),
+	AR_OPT("formatraw", formatraw, 1),
+
+	// Добавьте обработку стандартных опций FUSE
+    FUSE_OPT_KEY("-o ", FUSE_OPT_KEY_KEEP),  // Пробел после -o важен!
+    FUSE_OPT_KEY("-o", FUSE_OPT_KEY_KEEP),
+
+	FUSE_OPT_KEY("-V", KEY_VERSION),
+	FUSE_OPT_KEY("--version", KEY_VERSION),
+	FUSE_OPT_KEY("-h", KEY_HELP),
+	FUSE_OPT_KEY("--help", KEY_HELP),
+	FUSE_OPT_END
+};
+
+	const struct fuse_operations FuseWrapper::ar_oper = {
+		.getattr    = FuseWrapper::static_getattr,
+		.readlink   = FuseWrapper::static_readlink,
+		.mknod      = FuseWrapper::static_mknod,
+		.mkdir      = FuseWrapper::static_mkdir,
+		.unlink     = FuseWrapper::static_unlink,
+		.rmdir      = FuseWrapper::static_rmdir,
+		.symlink    = FuseWrapper::static_symlink,
+		.rename     = FuseWrapper::static_rename,
+		.link       = FuseWrapper::static_link,
+		.chmod      = FuseWrapper::static_chmod,
+		.chown      = FuseWrapper::static_chown,
+		.truncate   = FuseWrapper::static_truncate,
+		.open       = FuseWrapper::static_open,
+		.read       = FuseWrapper::static_read,
+		.write      = FuseWrapper::static_write,
+		.statfs     = FuseWrapper::static_statfs,
+		.readdir    = FuseWrapper::static_readdir,
+		.create     = FuseWrapper::static_create,
+		.utimens    = FuseWrapper::static_utimens,
+	};
+
+
+FuseWrapper::FuseWrapper(ArchiveFS& obj) {
+	fs = obj;
+	
+}
 
 int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args * outargs) { // Менять не надо
 	struct fuse_operations faux_oper;
 	switch(key) {
 		case FUSE_OPT_KEY_OPT:
 			printf("FUSE_OPT_KEY_OPT");
+			// Для опций вида "-o параметр" - пропускаем обработку
+            if (strncmp(arg, "-o", 2) == 0) {
+                return 0;  // Разрешаем FUSE обработать самостоятельно
+            }
 			return 1;
 
 		case FUSE_OPT_KEY_NONOPT:
 			if(!fs.archiveFile) {
-				fs.archiveFile = arg;
-				printf("FUSE_OPT_KEY_NONOPT !archiveFile");
+				//fs.archiveFile = arg;
+				// Создаем копию строки
+                fs.archiveFile = strdup(arg);
+				printf("\nFUSE_OPT_KEY_NONOPT !archiveFile\n");
 				return 0;
 			} else if(!fs.mtpt) {
-				fs.mtpt = arg;
-				printf("FUSE_OPT_KEY_NONOPT !mtpt");
+				// Создаем копию строки
+                fs.mtpt = strdup(arg);
+				//fs.mtpt = arg;
+				printf("\nFUSE_OPT_KEY_NONOPT !mtpt\n");
 				return 1;
 			} else {
-				usage(outargs->argv[0]);
-				printf("FUSE_OPT_KEY_NONOPT else");
+				fs.usage(outargs->argv[0]);
+				printf("\nFUSE_OPT_KEY_NONOPT else\n");
 				exit(1);
 			}
 
 		case KEY_HELP:
-			usage(outargs->argv[0]);
-			printf("KEY_HELP");
+			fs.usage(outargs->argv[0]);
+			printf("\nKEY_HELP\n");
 			exit(0);
 
 		case KEY_VERSION:
-			fprintf(stdout, "archivemount version " VERSION "\n%s (header " ARCHIVE_VERSION_ONLY_STRING ")\n", archive_version_details());
+			fprintf(stdout, "archivemount version ", "\n%s (header " ARCHIVE_VERSION_ONLY_STRING ")\n", archive_version_details());
 			fuse_opt_add_arg(outargs, "--version");
 			fuse_main(outargs->argc, outargs->argv, &faux_oper, NULL);
 			exit(0);
@@ -45,71 +187,71 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 {
 	// open archive and search first entry
 	printf("_ar_open_raw IS CALLABLE!");
-	NODE * node = firstchild(fs.root);
+	NODE * node = fs.firstchild(fs.root);
 	log("_ar_open_raw called, path: '%s'", node->name);
 
-	last_open_node.node = node;
+	fs.last_open_node.node = node;
 
-	if(last_open_node.archive) {
-		archive_read_free(last_open_node.archive);
+	if(fs.last_open_node.archiveInstance) {
+		archive_read_free(fs.last_open_node.archiveInstance);
 		lseek(fs.archiveFd, 0, SEEK_SET);
 	}
 
 	//	struct archive *archive;
 	int archive_ret;
 	/* search file in archive */
-	if((last_open_node.archive = archive_read_new()) == NULL) {
+	if((fs.last_open_node.archiveInstance = archive_read_new()) == NULL) {
 		lerrnum(ENOMEM);
 		return;
 	}
-	last_open_node.offset_in_archive_file = -2;
-	if(!archive_prepopen(last_open_node.archive))
+	fs.last_open_node.offset_in_archive_file = -2;
+	if(!fs.archive_prepopen(fs.last_open_node.archiveInstance))
 		return;
 
 	struct archive_entry * entry;
 	const char * realpath = archive_entry_pathname(node->entry);
 	/* search for file to read - "/data" must be the first entry */
-	while((archive_ret = archive_read_next_header(last_open_node.archive, &entry)) == ARCHIVE_OK)
+	while((archive_ret = archive_read_next_header(fs.last_open_node.archiveInstance, &entry)) == ARCHIVE_OK)
 		if(strcmp(realpath, archive_entry_pathname(entry)) == 0){
 			printf("_ar_open_raw | realpath = %s", realpath); // I
 			break;
 		}
 
-	last_open_node.offset_in_archive_file = 0;
+	fs.last_open_node.offset_in_archive_file = 0;
 }
 
  int FuseWrapper::_ar_read_archive_found_common(char * buf, size_t size, off_t offset) {
-	auto & archive = last_open_node.archive;
+	auto & archiveInstance = fs.last_open_node.archiveInstance;
 	int ret;
 
-	// we know last_open_node.offset_in_archive_file < offset (otherwise we reopened)
-	offset -= last_open_node.offset_in_archive_file;
+	// we know fs.last_open_node.offset_in_archive_file < offset (otherwise we reopened)
+	offset -= fs.last_open_node.offset_in_archive_file;
 
 	while(offset > 0) {
-		int skip = offset > (off_t)sizeof(temp_io_buf) ? (off_t)sizeof(temp_io_buf) : offset;
-		ret      = archive_read_data(archive, temp_io_buf, skip);
+		int skip = offset > (off_t)sizeof(fs.temp_io_buf) ? (off_t)sizeof(fs.temp_io_buf) : offset;
+		ret      = archive_read_data(archiveInstance, fs.temp_io_buf, skip);
 		if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
-			log("ar_read (skipping offset): %s", archive_error_string(archive));
-			errno = archive_errno(archive);
+			log("ar_read (skipping offset): %s", archive_error_string(archiveInstance));
+			errno = archive_errno(archiveInstance);
 			ret   = -1;
 			break;
 		}
 		offset -= skip;
-		last_open_node.offset_in_archive_file += skip;
+		fs.last_open_node.offset_in_archive_file += skip;
 	}
 	if(offset)
 		goto err;
 
 	/* read data */
-	ret = archive_read_data(archive, buf, size);
+	ret = archive_read_data(archiveInstance, buf, size);
 	if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
 	err:
-		log("ar_read (reading data): %s", archive_error_string(archive));
-		errno                                 = archive_errno(archive);
-		last_open_node.offset_in_archive_file = -2;
+		log("ar_read (reading data): %s", archive_error_string(archiveInstance));
+		errno                                 = archive_errno(archiveInstance);
+		fs.last_open_node.offset_in_archive_file = -2;
 		ret                                   = -1;
 	} else
-		last_open_node.offset_in_archive_file += ret;
+		fs.last_open_node.offset_in_archive_file += ret;
 
 	return ret;
 }
@@ -117,12 +259,12 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
  int FuseWrapper::_ar_read_raw(const char * path, char * buf, size_t size, off_t offset, struct fuse_file_info *) {
 	log("_ar_read_raw called, path: '%s'", path);
 	/* find node */
-	NODE * node = get_node_for_path(root, path);
+	NODE * node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		return -ENOENT;
 	}
 
-	if(last_open_node.node == node && last_open_node.offset_in_archive_file <= offset && last_open_node.offset_in_archive_file != -2)
+	if(fs.last_open_node.node == node && fs.last_open_node.offset_in_archive_file <= offset && fs.last_open_node.offset_in_archive_file != -2)
 		;
 	else
 		_ar_open_raw();
@@ -135,7 +277,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	const char * realpath;
 	log("_ar_read called, path: '%s'", path);
 	/* find node */
-	NODE * node = get_node_for_path(root, path);
+	NODE * node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		return -ENOENT;
 	}
@@ -164,47 +306,47 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		/* clean up */
 		close(fh);
 	} else {
-		auto & archive = last_open_node.archive;
+		auto & archiveInstance = fs.last_open_node.archiveInstance;
 		struct archive_entry * entry;
 		int archive_ret;
 
-		if(last_open_node.node == node && last_open_node.offset_in_archive_file <= offset && last_open_node.offset_in_archive_file != -2)
+		if(fs.last_open_node.node == node && fs.last_open_node.offset_in_archive_file <= offset && fs.last_open_node.offset_in_archive_file != -2)
 			goto ready;
 
-		log("reopening: last_open_node.node = %p; node = %p; last_open_node.offset_in_archive_file = %ld; offset = %ld", last_open_node.node, node,
-		    last_open_node.offset_in_archive_file, offset);
-		last_open_node.node                   = node;
-		last_open_node.offset_in_archive_file = -2;
+		log("reopening: fs.last_open_node.node = %p; node = %p; fs.last_open_node.offset_in_archive_file = %ld; offset = %ld", fs.last_open_node.node, node,
+		    fs.last_open_node.offset_in_archive_file, offset);
+		fs.last_open_node.node                   = node;
+		fs.last_open_node.offset_in_archive_file = -2;
 
-		if(archive) {
-			archive_read_free(archive);
-			lseek(archiveFd, 0, SEEK_SET);
+		if(archiveInstance) {
+			archive_read_free(archiveInstance);
+			lseek(fs.archiveFd, 0, SEEK_SET);
 		}
-		archive = archive_read_new();
-		if(!archive) {
+		archiveInstance = archive_read_new();
+		if(!archiveInstance) {
 			log("Out of memory");
 			return -ENOMEM;
 		}
 
-		if(!archive_prepopen(archive))
+		if(!fs.archive_prepopen(archiveInstance))
 			return -EIO;
 
-		last_open_node.offset_in_archive_file = -1;
+		fs.last_open_node.offset_in_archive_file = -1;
 
 	ready:
-		if(last_open_node.offset_in_archive_file == -1) {
+		if(fs.last_open_node.offset_in_archive_file == -1) {
 			log("skipping");
 			realpath = archive_entry_pathname(node->entry);
 
 			/* search for file to read */
-			while((archive_ret = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
+			while((archive_ret = archive_read_next_header(archiveInstance, &entry)) == ARCHIVE_OK) {
 				const char * name;
 				name = archive_entry_pathname(entry);
 				if(strcmp(realpath, name) == 0) {
-					last_open_node.offset_in_archive_file = 0;
+					fs.last_open_node.offset_in_archive_file = 0;
 					break;
 				}
-				archive_read_data_skip(archive);
+				archive_read_data_skip(archiveInstance);
 			}
 		}
 
@@ -220,7 +362,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		log("failed to get lock: %s\n", strerror(ret));
 		return -EIO;
 	} else {
-		if(options.formatraw) {
+		if(fs.optionsInstance.formatraw) {
 			ret = _ar_read_raw(path, buf, size, offset, fi);
 		} else {
 			ret = _ar_read(path, buf, size, offset, fi);
@@ -230,41 +372,41 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	return ret;
 }
 
- off_t _ar_getsizeraw(const char * path) {
+ off_t FuseWrapper::_ar_getsizeraw(const char * path) {
 	off_t offset = 0, ret;
 	NODE * node;
 	const char * realpath;
 
 	log("ar_getsizeraw called, path: '%s'", path);
 	/* find node */
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		return -ENOENT;
 	}
 
-	struct archive * archive;
+	struct archive * archiveInstance;
 	struct archive_entry * entry;
 	int archive_ret;
 	/* search file in archive */
 	realpath = archive_entry_pathname(node->entry);
 
-	if((archive = archive_read_new()) == NULL) {
+	if((archiveInstance = archive_read_new()) == NULL) {
 		log("Out of memory");
 		return -ENOMEM;
 	}
 
-	if(!archive_prepopen(archive))
+	if(!fs.archive_prepopen(archiveInstance))
 		return -EIO;
 
 	/* search for file to read */
-	while((archive_ret = archive_read_next_header(archive, &entry)) == ARCHIVE_OK) {
+	while((archive_ret = archive_read_next_header(archiveInstance, &entry)) == ARCHIVE_OK) {
 		const char * name = archive_entry_pathname(entry);
 		if(strcmp(realpath, name) == 0) {
 			/* read until no more data */
-			while((ret = archive_read_data(archive, temp_io_buf, sizeof(temp_io_buf))) != 0) {
+			while((ret = archive_read_data(archiveInstance, fs.temp_io_buf, sizeof(fs.temp_io_buf))) != 0) {
 				if(ret == ARCHIVE_FATAL || ret == ARCHIVE_WARN || ret == ARCHIVE_RETRY) {
-					log("ar_read (skipping offset): %s", archive_error_string(archive));
-					errno = archive_errno(archive);
+					//log("ar_read (skipping offset): %s", archive_error_string(archive));
+					errno = archive_errno(archiveInstance);
 					ret   = -1;
 					break;
 				}
@@ -273,11 +415,11 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 			}
 			break;
 		}
-		archive_read_data_skip(archive);
+		archive_read_data_skip(archiveInstance);
 	}  // end of search for file to read
 	/* close archive */
-	archive_read_free(archive);
-	lseek(archiveFd, 0, SEEK_SET);
+	archive_read_free(archiveInstance);
+	lseek(fs.archiveFd, 0, SEEK_SET);
 
 	return offset;
 }
@@ -288,7 +430,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	off_t size;
 
 	// log("_ar_getattr called, path: '%s'", path);
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		return -ENOENT;
 	}
@@ -297,19 +439,19 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		ret = _ar_getattr(archive_entry_hardlink(node->entry), stbuf);
 		return ret;
 	}
-	if(options.formatraw && node->children.empty()) {
-		fstat(archiveFd, stbuf);
+	if(fs.optionsInstance.formatraw && node->children.empty()) {
+		fstat(fs.archiveFd, stbuf);
 		size = rawcache.st_size;
 		if(size < 0)
 			return -1;
 		stbuf->st_size = size;
 	} else {
 		*stbuf = *archive_entry_stat(node->entry);
-		if(options.formatraw && !node->children.empty())
+		if(fs.optionsInstance.formatraw && !node->children.empty())
 			stbuf->st_size = 4096;
 	}
 	stbuf->st_blocks  = (node->entry_size_in_archive + 511) / 512;
-	stbuf->st_blksize = sizeof(temp_io_buf);
+	stbuf->st_blksize = sizeof(fs.temp_io_buf);
 	/* when sharing via Samba nlinks have to be at
 	   least 2 for directories or directories will
 	   be shown as files, and 1 for files or they
@@ -324,7 +466,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		}
 	}
 
-	if(options.readonly) {
+	if(fs.optionsInstance.readonly) {
 		stbuf->st_mode &= ~0222;
 	}
 
@@ -359,23 +501,23 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	printf("\nar_mkdir callable!\n");
 	
 	log("ar_mkdir called, path '%s', mode %o", path, mode);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
 	pthread_mutex_lock(&lock);
 	/* check for existing node */
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(node) {
 		pthread_mutex_unlock(&lock);
 		return -EEXIST;
 	}
 	/* create temp dir */
-	if((tmp = get_temp_file(&location, mode, true)) < 0) {
+	if((tmp = fs.get_temp_file(&location, mode, true)) < 0) {
 		pthread_mutex_unlock(&lock);
 		return tmp;
 	}
 	/* build node */
-	if((node = init_node()) == NULL) {
+	if((node = fs.init_node()) == NULL) {
 		pthread_mutex_unlock(&lock);
 		return -ENOMEM;
 	}
@@ -385,25 +527,25 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	node->basename    = strrchr(node->name, '/') + 1;
 	node->namechanged = false;
 	/* build entry */
-	if(!root->children.empty() && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
+	if(!fs.root->children.empty() && node->name[0] == '/' && archive_entry_pathname(fs.firstchild(fs.root)->entry)[0] != '/') {
 		archive_entry_set_pathname(node->entry, node->name + 1);
 	} else {
 		archive_entry_set_pathname(node->entry, node->name);
 	}
-	if((tmp = update_entry_stat(node)) < 0) {
+	if((tmp = fs.update_entry_stat(node)) < 0) {
 		log("mkdir: error stat'ing dir %s: %s", node->location, strerror(-tmp));
 		rmdir(location);
 		free(location);
-		free_node(node);
+		fs.free_node(node);
 		pthread_mutex_unlock(&lock);
 		return tmp;
 	}
 	/* add node to tree */
-	if(insert_by_path(root, node) != 0) {
+	if(fs.insert_by_path(node) != 0) {
 		log("ERROR: could not insert %s into tree", node->name);
 		rmdir(location);
 		free(location);
-		free_node(node);
+		fs.free_node(node);
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
@@ -421,11 +563,11 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	NODE * node;
 
 	log("ar_rmdir called, path '%s'", path);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
 	pthread_mutex_lock(&lock);
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
@@ -452,8 +594,8 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		}
 		free(node->location);
 	}
-	remove_child(node);
-	free_node(node);
+	fs.remove_child(node);
+	fs.free_node(node);
 	archiveModified = true;
 	pthread_mutex_unlock(&lock);
 	return 0;
@@ -466,18 +608,18 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	struct group * grp;
 
 	log("symlink called, %s -> %s", from, to);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
 	pthread_mutex_lock(&lock);
 	/* check for existing node */
-	node = get_node_for_path(root, to);
+	node = fs.get_node_for_path(fs.root, to);
 	if(node) {
 		pthread_mutex_unlock(&lock);
 		return -EEXIST;
 	}
 	/* build node */
-	if((node = init_node()) == NULL) {
+	if((node = fs.init_node()) == NULL) {
 		pthread_mutex_unlock(&lock);
 		return -ENOMEM;
 	}
@@ -493,11 +635,11 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	st.st_gid     = getgid();
 	st.st_rdev    = 0;
 	st.st_size    = strlen(from);
-	st.st_blksize = sizeof(temp_io_buf);
+	st.st_blksize = sizeof(fs.temp_io_buf);
 	st.st_blocks  = 0;
 	st.st_atime = st.st_ctime = st.st_mtime = time(NULL);
 	/* build entry */
-	if(!root->children.empty() && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
+	if(!fs.root->children.empty() && node->name[0] == '/' && archive_entry_pathname(fs.firstchild(fs.root)->entry)[0] != '/') {
 		archive_entry_set_pathname(node->entry, node->name + 1);
 	} else {
 		archive_entry_set_pathname(node->entry, node->name);
@@ -512,7 +654,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	} else {
 		if(errno == EINTR || errno == EIO || errno == EMFILE || errno == ENFILE || errno == ENOMEM || errno == ERANGE) {
 			log("ERROR calling getpwuid: %s", strerror(errno));
-			free_node(node);
+			fs.free_node(node);
 			pthread_mutex_unlock(&lock);
 			return -errno;
 		}
@@ -526,7 +668,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	} else {
 		if(errno == EINTR || errno == EIO || errno == EMFILE || errno == ENFILE || errno == ENOMEM || errno == ERANGE) {
 			log("ERROR calling getgrgid: %s", strerror(errno));
-			free_node(node);
+			fs.free_node(node);
 			pthread_mutex_unlock(&lock);
 			return -errno;
 		}
@@ -534,9 +676,9 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		   not be resolved into a name */
 	}
 	/* add node to tree */
-	if(insert_by_path(root, node) != 0) {
+	if(fs.insert_by_path(node) != 0) {
 		log("ERROR: could not insert symlink %s into tree", node->name);
-		free_node(node);
+		fs.free_node(node);
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
@@ -554,18 +696,18 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	struct group * grp;
 
 	log("ar_link called, %s -> %s", from, to);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
 	pthread_mutex_lock(&lock);
 	/* find source node */
-	fromnode = get_node_for_path(root, from);
+	fromnode = fs.get_node_for_path(fs.root, from);
 	if(!fromnode) {
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
 	/* check for existing target */
-	node = get_node_for_path(root, to);
+	node = fs.get_node_for_path(fs.root, to);
 	if(node) {
 		pthread_mutex_unlock(&lock);
 		return -EEXIST;
@@ -573,7 +715,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	/* extract originals stat info */
 	_ar_getattr(from, &st);
 	/* build new node */
-	if((node = init_node()) == NULL) {
+	if((node = fs.init_node()) == NULL) {
 		pthread_mutex_unlock(&lock);
 		return -ENOMEM;
 	}
@@ -596,7 +738,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	} else {
 		if(errno == EINTR || errno == EIO || errno == EMFILE || errno == ENFILE || errno == ENOMEM || errno == ERANGE) {
 			log("ERROR calling getpwuid: %s", strerror(errno));
-			free_node(node);
+			fs.free_node(node);
 			pthread_mutex_unlock(&lock);
 			return -errno;
 		}
@@ -610,7 +752,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	} else {
 		if(errno == EINTR || errno == EIO || errno == EMFILE || errno == ENFILE || errno == ENOMEM || errno == ERANGE) {
 			log("ERROR calling getgrgid: %s", strerror(errno));
-			free_node(node);
+			fs.free_node(node);
 			pthread_mutex_unlock(&lock);
 			return -errno;
 		}
@@ -618,9 +760,9 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		   not be resolved into a name */
 	}
 	/* add node to tree */
-	if(insert_by_path(root, node) != 0) {
+	if(fs.insert_by_path(node) != 0) {
 		log("ERROR: could not insert hardlink %s into tree", node->name);
-		free_node(node);
+		fs.free_node(node);
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
@@ -635,7 +777,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	char * tmpbuf   = NULL;
 	off_t tmpoffset = 0;
 	int tmp, fh;
-	if((fh = get_temp_file(location, (mode_t)-1, false)) < 0)
+	if((fh = fs.get_temp_file(location, (mode_t)-1, false)) < 0)
 		return fh;
 
 	/* copy original file to temporary file */
@@ -681,10 +823,10 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	int fh;
 
 	log("_ar_truncate called, path '%s'", path);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		return -ENOENT;
 	}
@@ -720,7 +862,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	/* record location, update entry */
 	node->location = location;
 	node->modified = true;
-	if((tmp = update_entry_stat(node)) < 0) {
+	if((tmp = fs.update_entry_stat(node)) < 0) {
 		log("write: error stat'ing file %s: %s", node->location, strerror(-tmp));
 		close(fh);
 		unlink(location);
@@ -754,10 +896,10 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	int fh;
 
 	log("_ar_write called, path '%s'", path);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		return -ENOENT;
 	}
@@ -796,7 +938,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	/* record location, update entry */
 	node->location = location;
 	node->modified = true;
-	if((tmp = update_entry_stat(node)) < 0) {
+	if((tmp = fs.update_entry_stat(node)) < 0) {
 		log("write: error stat'ing file %s: %s", node->location, strerror(-tmp));
 		close(fh);
 		unlink(location);
@@ -823,23 +965,23 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	int tmp;
 
 	log("ar_mknod called, path %s", path);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
 	pthread_mutex_lock(&lock);
 	/* check for existing node */
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(node) {
 		pthread_mutex_unlock(&lock);
 		return -EEXIST;
 	}
 	/* create name for temp file */
-	if((tmp = get_temp_node(&location, mode, rdev)) < 0) {
+	if((tmp = fs.get_temp_node(&location, mode, rdev)) < 0) {
 		pthread_mutex_unlock(&lock);
 		return tmp;
 	}
 	/* build node */
-	if((node = init_node()) == NULL) {
+	if((node = fs.init_node()) == NULL) {
 		pthread_mutex_unlock(&lock);
 		return -ENOMEM;
 	}
@@ -849,25 +991,25 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	node->basename = strrchr(node->name, '/') + 1;
 
 	/* build entry */
-	if(!root->children.empty() && node->name[0] == '/' && archive_entry_pathname(firstchild(root)->entry)[0] != '/') {
+	if(!fs.root->children.empty() && node->name[0] == '/' && archive_entry_pathname(fs.firstchild(fs.root)->entry)[0] != '/') {
 		archive_entry_set_pathname(node->entry, node->name + 1);
 	} else {
 		archive_entry_set_pathname(node->entry, node->name);
 	}
-	if((tmp = update_entry_stat(node)) < 0) {
+	if((tmp = fs.update_entry_stat(node)) < 0) {
 		log("mknod: error stat'ing file %s: %s", node->location, strerror(0 - tmp));
 		unlink(location);
 		free(location);
-		free_node(node);
+		fs.free_node(node);
 		pthread_mutex_unlock(&lock);
 		return tmp;
 	}
 	/* add node to tree */
-	if(insert_by_path(root, node) != 0) {
+	if(fs.insert_by_path(node) != 0) {
 		log("ERROR: could not insert %s into tree", node->name);
 		unlink(location);
 		free(location);
-		free_node(node);
+		fs.free_node(node);
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
@@ -881,10 +1023,10 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	NODE * node;
 
 	log("_ar_unlink called, %s", path);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		return -ENOENT;
 	}
@@ -900,8 +1042,8 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		}
 		free(node->location);
 	}
-	remove_child(node);
-	free_node(node);
+	fs.remove_child(node);
+	fs.free_node(node);
 	archiveModified = true;
 	return 0;
 }
@@ -919,10 +1061,10 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	NODE * node;
 
 	log("_ar_chmod called, path '%s', mode: %o", path, mode);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		return -ENOENT;
 	}
@@ -961,10 +1103,10 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	NODE * node;
 
 	log("_ar_chown called, %s", path);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		return -ENOENT;
 	}
@@ -997,10 +1139,10 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	NODE * node;
 
 	log("_ar_utime called, %s", path);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		return -ENOENT;
 	}
@@ -1032,7 +1174,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	return ret;
 }
 
- size_t FuseWrapper::count_nodes(NODE * node = root) {
+ size_t FuseWrapper::count_nodes(NODE * node) {
 	size_t ret = 1;
 	for(auto && [_, child] : node->children)
 		ret += count_nodes(child);
@@ -1044,7 +1186,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	stbuf->f_namemax = 255;  // seems to be enforced by fuse; matches Linux
 
 	stbuf->f_frsize = stbuf->f_bsize = BLOCK_SIZE;
-	stbuf->f_blocks                  = (archiveFileSize + (BLOCK_SIZE - 1)) / BLOCK_SIZE;
+	stbuf->f_blocks                  = (fs.archiveFileSize + (BLOCK_SIZE - 1)) / BLOCK_SIZE;
 
 	stbuf->f_files = count_nodes();
 	return 0;
@@ -1061,14 +1203,14 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	char * temp_name;
 
 	log("ar_rename called, from: '%s', to: '%s', flags=%x", from, to, flags);
-	if(!archiveWriteable || options.readonly)
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly)
 		return -EROFS;
 #if FUSE_MAJOR_VERSION >= 3
 	if(flags)
 		return -EOPNOTSUPP;
 #endif
 	pthread_mutex_lock(&lock);
-	from_node = get_node_for_path(root, from);
+	from_node = fs.get_node_for_path(fs.root, from);
 	if(!from_node) {
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
@@ -1077,7 +1219,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		/* before actually renaming the from_node, we must remove
 		 * the to_node if it exists */
 		NODE * to_node;
-		to_node = get_node_for_path(root, to);
+		to_node = fs.get_node_for_path(fs.root, to);
 		if(to_node) {
 			ret = _ar_unlink(to_node->name);
 			if(0 != ret) {
@@ -1085,7 +1227,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 			}
 		}
 	}
-	/* meta data is changed in save() */
+	/* meta data is changed in fs.save() */
 	/* change from_node name */
 	if(*to != '/') {
 		if(asprintf(&temp_name, "/%s", to) == -1) {
@@ -1100,20 +1242,20 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 			return -ENOMEM;
 		}
 	}
-	remove_child(from_node);
-	correct_hardlinks_to_node(from_node->name, temp_name);
+	fs.remove_child(from_node);
+	fs.correct_hardlinks_to_node(from_node->name, temp_name);
 	free(from_node->name);
 	from_node->name        = temp_name;
 	from_node->basename    = strrchr(from_node->name, '/') + 1;
 	from_node->namechanged = true;
-	ret                    = insert_by_path(root, from_node);
+	ret                    = fs.insert_by_path(from_node);
 	if(0 != ret) {
 		log("failed to re-insert node %s", from_node->name);
 	}
 	if(!from_node->children.empty()) {
 		/* it is a directory, recursive change of all from_nodes
 		 * below it is required */
-		ret = rename_recursively(from_node, from, to);
+		ret = fs.rename_recursively(from_node, from, to);
 	}
 	archiveModified = true;
 	pthread_mutex_unlock(&lock);
@@ -1130,7 +1272,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		fprintf(stderr, "could not acquire lock for archive: %s\n", strerror(ret));
 		return ret;
 	}
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
@@ -1155,18 +1297,18 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		fprintf(stderr, "could not acquire lock for archive: %s\n", strerror(ret));
 		return ret;
 	}
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
-	if((fi->flags & O_ACCMODE) != O_RDONLY && !archiveWriteable) {
+	if((fi->flags & O_ACCMODE) != O_RDONLY && !fs.archiveWriteable) {
 		pthread_mutex_unlock(&lock);
 		return -EROFS;
 	}
 	/* no need to recurse into links since function doesn't do anything */
 	fi->fh = 0;
-	if(options.formatraw)
+	if(fs.optionsInstance.formatraw)
 		_ar_open_raw();
 	pthread_mutex_unlock(&lock);
 	return 0;
@@ -1186,7 +1328,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		log("could not acquire lock for archive: %s\n", strerror(ret));
 		return ret;
 	}
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(!node) {
 		log("path '%s' not found", path);
 		pthread_mutex_unlock(&lock);
@@ -1214,7 +1356,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 		if(archive_entry_hardlink(child->entry)) {
 			/* file is a hardlink, stat'ing it somehow does not
 			 * work; stat the original instead */
-			NODE * orig = get_node_for_path(root, archive_entry_hardlink(child->entry));
+			NODE * orig = fs.get_node_for_path(fs.root, archive_entry_hardlink(child->entry));
 			if(!orig) {
 				pthread_mutex_unlock(&lock);
 				return -ENOENT;
@@ -1226,7 +1368,7 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 			entry_size_in_archive = child->entry_size_in_archive;
 		}
 		st.st_blocks  = (entry_size_in_archive + 511) / 512;
-		st.st_blksize = sizeof(temp_io_buf);
+		st.st_blksize = sizeof(fs.temp_io_buf);
 
 		if(filler(buf, child->basename.data(), &st, 0
 #if FUSE_MAJOR_VERSION >= 3
@@ -1253,23 +1395,23 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	   mknod, with the exception that the temp file is created with
 	   creat() instead of mknod() */
 	log("ar_create called, path '%s'", path);
-	if(!archiveWriteable || options.readonly) {
+	if(!fs.archiveWriteable || fs.optionsInstance.readonly) {
 		return -EROFS;
 	}
 	pthread_mutex_lock(&lock);
 	/* check for existing node */
-	node = get_node_for_path(root, path);
+	node = fs.get_node_for_path(fs.root, path);
 	if(node) {
 		pthread_mutex_unlock(&lock);
 		return -EEXIST;
 	}
 	/* create temp file */
-	if((tmp = get_temp_file(&location, mode, false)) < 0) {
+	if((tmp = fs.get_temp_file(&location, mode, false)) < 0) {
 		pthread_mutex_unlock(&lock);
 		return tmp;
 	}
 	/* build node */
-	if((node = init_node()) == NULL) {
+	if((node = fs.init_node()) == NULL) {
 		pthread_mutex_unlock(&lock);
 		return -ENOMEM;
 	}
@@ -1279,21 +1421,21 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	node->basename = strrchr(node->name, '/') + 1;
 
 	/* build entry */
-	correct_name_in_entry(node);
-	if((tmp = update_entry_stat(node)) < 0) {
+	fs.correct_name_in_entry(node);
+	if((tmp = fs.update_entry_stat(node)) < 0) {
 		log("mknod: error stat'ing file %s: %s", node->location, strerror(0 - tmp));
 		unlink(location);
 		free(location);
-		free_node(node);
+		fs.free_node(node);
 		pthread_mutex_unlock(&lock);
 		return tmp;
 	}
 	/* add node to tree */
-	if(insert_by_path(root, node) != 0) {
+	if(fs.insert_by_path(node) != 0) {
 		log("ERROR: could not insert %s into tree", node->name);
 		unlink(location);
 		free(location);
-		free_node(node);
+		fs.free_node(node);
 		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
@@ -1303,72 +1445,111 @@ int FuseWrapper::ar_opt_proc(void *, const char * arg, int key, struct fuse_args
 	return 0;
 }
 
-void FuseWrapper::run(int argc, char* argv[]){
+int FuseWrapper::run(int argc, char** argv){
     struct stat st;
 	int oldwd             = -1;
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
+	/*signal(SIGINT, [](int) { fuse_exit(fuse_get_context()->fuse); });
+	signal(SIGTERM, [](int) { fuse_exit(fuse_get_context()->fuse); });*/
+
+	// Сохраняем оригинальные аргументы
+	const char* saved_archive = (argc > 1) ? argv[argc-2] : nullptr;
+	const char* saved_mtpt = (argc > 2) ? argv[argc-1] : nullptr;
+
+	printf("Using FUSE version %d.%d\n", FUSE_MAJOR_VERSION, FUSE_MINOR_VERSION);
+	fuse_opt_add_arg(&args, "-s");  // Single-threaded режим
+
 	/* parse cmdline args */
-	if(fuse_opt_parse(&args, &fs.options, this->ar_opts, ar_opt_proc) == -1)
+	if(fuse_opt_parse(&args, &fs.optionsInstance, ar_opts, static_opt_proc) == -1){ // От чего зависит?
+	printf("\nfuse_opt_parse\n");
 		return -1;
-	if(fs.archiveFile == NULL) {
+	}
+	/*if(fs.archiveFile == NULL) {
+		printf("fs.archiveFile == NULL\n");
 		fs.usage(argv[0]);
 		return (1);
 	}
 	if(fs.mtpt == NULL) {
+		printf("fs.mtpt == NULL\n");
 		fs.usage(argv[0]);
 		return (1);
+	}*/
+
+	// Если значения не установились, используем сохраненные
+	if (!fs.archiveFile && saved_archive) {
+		fs.archiveFile = strdup(saved_archive);
+	}
+	if (!fs.mtpt && saved_mtpt) {
+		fs.mtpt = strdup(saved_mtpt);
 	}
 
+	// Проверяем обязательные аргументы
+	if (!fs.archiveFile || !fs.mtpt) {
+		fprintf(stderr, "Error: Missing required arguments\n");
+		fs.usage(argv[0]);
+		return 1;
+	}
+
+	// Отладочный вывод
+	printf("After parsing:\n");
+	printf("  Archive: %s\n", fs.archiveFile);
+	printf("  Mount point: %s\n", fs.mtpt);
+
+
 	/* check if mtpt is ok and writeable */
-	if(stat(mtpt, &st) != 0) {
-		lerr("%s: %s", mtpt, strerror(errno));
+	if(stat(fs.mtpt, &st) != 0) {
+		printf("%s: %s", fs.mtpt, strerror(errno));
+		lerr("%s: %s", fs.mtpt, strerror(errno));
 		return (1);
 	}
 	// https://github.com/libfuse/libfuse/commit/64e11073b9347fcf9c6d1eea143763ba9e946f70
-	if(!strncmp(mtpt, "/dev/fd/", sizeof("/dev/fd/") - 1))	// mtpt имеет вид /dev/fd/N то 
+	if(!strncmp(fs.mtpt, "/dev/fd/", sizeof("/dev/fd/") - 1))	// fs.mtpt имеет вид /dev/fd/N то 
 		st.st_mode = (st.st_mode & ~S_IFMT) | S_IFDIR; //  заставляем линукс думать что это директория
-	else if(!S_ISDIR(st.st_mode)) {		// Иначе проверяем чтоб mtpt был директорией
-		lerr("%s: %s", mtpt, strerror(ENOTDIR));
+	else if(!S_ISDIR(st.st_mode)) {		// Иначе проверяем чтоб fs.mtpt был директорией
+		printf("%s: %s", fs.mtpt, strerror(ENOTDIR));
+		lerr("%s: %s", fs.mtpt, strerror(ENOTDIR));
 		return (1);
 	}
 
-	if(options.password) { // Пока не оч разбирал 
+	if(fs.optionsInstance.password) { // Пока не оч разбирал 
 		struct termios orig = noEcho();
 		fputs("Enter passphrase: ", stderr);
 		size_t user_passphrase_size;
-		getPassphrase(&user_passphrase, &user_passphrase_size, stdin);
+		getPassphrase(&fs.user_passphrase, &user_passphrase_size, stdin);
 		fputs("\n", stderr);
 		tcsetattr(0, TCSANOW, &orig);
 	}
 
-	if(options.formatraw)
-		options.readonly = true;
-	if(options.readonly)
+	if(fs.optionsInstance.formatraw)
+		fs.optionsInstance.readonly = true;
+	if(fs.optionsInstance.readonly)
 		fuse_opt_add_arg(&args, "-r");	// Не разбирал
 	else
-		archiveWriteable = options.nosave || (access(archiveFile, W_OK) == 0);
+		fs.archiveWriteable = fs.optionsInstance.nosave || (access(fs.archiveFile, W_OK) == 0);
 
 	/* open archive and read meta data */
-	archiveFd = open(archiveFile, O_RDONLY | O_CLOEXEC);
-	if(archiveFd == -1) {
-		lerr("%s: %s", archiveFile, strerror(errno));
+	fs.archiveFd = open(fs.archiveFile, O_RDONLY | O_CLOEXEC);
+	if(fs.archiveFd == -1) {
+		printf("%s: %s", fs.archiveFile, strerror(errno));
+		lerr("%s: %s", fs.archiveFile, strerror(errno));
 		return 1;
 	}
-	if(build_tree(st.st_mode) != 0) {
+	if(fs.build_tree(st.st_mode) != 0) {
+		printf("Insuccessful build_tree\n");
 		return (1);
 	}
-	if(options.formatraw) {
+	if(fs.optionsInstance.formatraw) {
 		/* create rawcache */
-		rawcache.st_size = _ar_getsizeraw(firstchild(root)->name);
+		rawcache.st_size = _ar_getsizeraw(fs.firstchild(fs.root)->name);
 		// log("cache st_size = %ld",rawcache.st_size);
 	}
 
 #ifndef O_PATH
 #define O_PATH O_RDONLY
 #endif
-	/* save directory this was started from */
-	if(!options.readonly && !options.nosave)
+	/* fs.save directory this was started from */
+	if(!fs.optionsInstance.readonly && !fs.optionsInstance.nosave)
 		oldwd = open(".", O_PATH | O_CLOEXEC);		// Открывают текущую директорию, но зачем?
 
 	/* Initialize the node tree lock */
@@ -1383,17 +1564,17 @@ void FuseWrapper::run(int argc, char* argv[]){
 	
 	fuse_main(args.argc, args.argv, &ar_oper, NULL);
 
-	/* save changes if modified; must be in original directory (libarchive can chdir) */
-	if(archiveModified) {
-		if(!options.nosave) {
+	/* fs.save changes if modified; must be in original directory (libarchive can chdir) */
+	/*if(archiveModified) {
+		if(!fs.optionsInstance.nosave) {
 			if(fchdir(oldwd))
-				fprintf(stderr, "fchdir() to old path failed, can't save new archive\n");
-			else if(int err = save(archiveFile); err)
+				fprintf(stderr, "fchdir() to old path failed, can't fs.save new archive\n");
+			else if(int err = fs.save(fs.archiveFile); err)
 				fprintf(stderr, "Saving new archive failed: %s\n", strerror(-err));
 		}
 
-		nosave();
-	}
+		fs.nosave();
+	}*/
 
 	return 0;
 }

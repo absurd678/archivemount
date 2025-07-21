@@ -1,92 +1,30 @@
-#define FUSE_USE_VERSION 30
+//#ifndef ARCHIVEFS_HPP
+//#define ARCHIVEFS_HPP
+#pragma once
+#include "Common.hpp"
+static struct termios noEcho() {
+	struct termios orig, t;
+	tcgetattr(0, &orig);
+	t = orig;
+	t.c_lflag &= ~ECHO;
+	tcsetattr(0, TCSANOW, &t);
+	return orig;
+}
 
-#define BLOCK_SIZE 10240
-
-#include <algorithm>
-#include <archive.h>
-#include <archive_entry.h>
-#include <cinttypes>
-#include <dirent.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <fuse.h>
-#include <fuse_opt.h>
-#include <grp.h>
-#include <map>
-#include <new>
-#include <pthread.h>
-#include <pwd.h>
-#include <regex.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string_view>
-#include <sys/stat.h>
-#include <sys/statvfs.h>
-#include <sys/types.h>
-#include <termios.h>
-#include <time.h>
-#include <unistd.h>
-#include <utime.h>
-#include <wchar.h>
-
-
-
-#include <iostream>
-using namespace std::literals;
-
-#ifdef NDEBUG
-#define log(format, ...)
-#else
-#define log(format, ...) fprintf(stderr, "l. %4d: " format "\n", __LINE__, ##__VA_ARGS__)
-#endif
-#define lerr(format, ...) fprintf(stderr, "archivemount: %s: " format "\n", __func__, ##__VA_ARGS__)
-#define lerrnum(err) lerr("%s", strerror(err))
-#define lerrno() lerrnum(errno)
-
-#if __APPLE__
-#define st_mtim st_mtimespec
-#endif
-
-
-//-----------------------С Т Р У К Т У Р Ы--------------------------------------------------
-
-// Элемент файловой системы
-typedef struct node {
-	// ^ must be first
-	struct node * parent;
-	char * name;                                 /* fully qualified with prepended '/' */
-	std::string_view basename;                   /* every after the last '/'; substring of name */
-	char * location;                             /* location on disk for new/modified files, else NULL */
-	struct archive_entry * entry;                /* libarchive header data */
-	off_t entry_size_in_archive;                 /* for st_blocks */
-	std::map<std::string_view, node *> children; /* basename -> node */
-	bool namechanged;                            /* true when file was renamed */
-	bool modified;                               /* true when node was modified */
-} NODE;
-
-// V1 UNIX-style caching: there's only one inode open, globally, at a time, at most
-// This still lets us service most reads linearly
-static struct {
-	NODE * node;
-	struct archive * archive;
-	off_t offset_in_archive_file;  // -1 = not yet found; -2 = poison
-} last_open_node;
-
-struct Options {    // флаги
-    bool readonly;
-    bool password;
-    bool nosave;
-    std::string subtree;
-};
-
+static ssize_t getPassphrase(char ** lineptr, size_t * n, FILE * stream) {
+	ssize_t ret = getline(lineptr, n, stream);
+	/* Strip newline off the end */
+	if(ret > 0 && (*lineptr)[ret - 1] == '\n') {
+		(*lineptr)[--ret] = '\0';
+	}
+	return ret;
+}
 
 class ArchiveFS {
     public:     // Доступ только для тестирования
         
-        ArchiveFS(){};      // Путь к архиву, флаги
-        ~ArchiveFS(){};
+        ArchiveFS();      // Путь к архиву, флаги
+        ~ArchiveFS();
         
         //void mount(const std::string& mountPoint);      
         
@@ -94,17 +32,24 @@ class ArchiveFS {
         const Node* getRoot() const { return root_; }
         bool isMounted() const { return mounted_; }*/
     
-    private:        // Логика деревьев и т д
+            // Логика деревьев и т д
 
         //----------------------Поля--------------------------------
 
         int archiveFd;      // Дескриптор архива
-        Options& options;   // выбранные режимы работы
+        options optionsInstance;   // выбранные режимы работы
         NODE * root;
         const char * mtpt;  // Путь к точке монтирования 
         const char * archiveFile;		// Путь к архиву каталога
-        char * user_passphrase;         
+        char * user_passphrase;      
+        bool archiveWriteable; 
+        uint64_t archiveFileSize; 
+        
+        char * tmpdir_for_nodes;
+        uint64_t tmpdir_for_nodes_children;
+        static thread_local char temp_io_buf[64 * 1024];
 
+        last_open_node_struct last_open_node;
         //--------------------------Методы----------------------------
         
         void usage(const char * progname);
@@ -123,14 +68,23 @@ class ArchiveFS {
         * specified in node->name
         * @return 0 on success, 0-errno else (ENOENT or ENOTDIR)
         */
-        int insert_by_path(NODE * root, NODE * node);
-        size_t count_nodes(NODE * node = root);
-        bool archive_prepopen(struct archive * archive);
-        uint64_t total_entry_size_in_archive(NODE * node = root);
-        void redistribute_entry_size_in_archive(double scale, NODE * node = root);
+        int insert_by_path(NODE * node);
+        
+        bool archive_prepopen(struct archive * archiveInstance);
+        uint64_t total_entry_size_in_archive(NODE * node);
+        uint64_t total_entry_size_in_archive(){ // Версия по умолчанию
+            return total_entry_size_in_archive(root);
+        }
+        void redistribute_entry_size_in_archive(double scale, NODE * node);
+        void redistribute_entry_size_in_archive(double scale){ // Версия по умолчанию
+            redistribute_entry_size_in_archive(scale, root);
+        }
         int build_tree(mode_t mtpt_mode);
         NODE * find_modified_node(NODE * start);
-        void correct_hardlinks_to_node(const char * old_name, const char * new_name, NODE * from = root);
+        void correct_hardlinks_to_node(const char * old_name, const char * new_name, NODE * from);
+        void correct_hardlinks_to_node(const char * old_name, const char * new_name){ // Версия по умолчанию
+            correct_hardlinks_to_node(old_name, new_name, root);
+        }
         NODE * firstchild(NODE * node);
         void correct_name_in_entry(NODE * node);
         NODE * get_node_for_path(NODE * start, const char * path);
@@ -140,7 +94,7 @@ class ArchiveFS {
 
                // Унести в поля
         int get_temp_file(char ** location, mode_t mode, bool directory);
-
+        int get_temp_node(char ** location, mode_t mode, dev_t dev);
         /**
          * Updates given nodes node->entry by stat'ing node->location. Does not update
          * the name!
@@ -152,6 +106,9 @@ class ArchiveFS {
                                    // Унести в поля
         void write_new_modded_file(NODE * node, struct archive_entry * wentry, struct archive * newarc);
         int save(const char * archiveFile);
-        void nosave(NODE * node = root_);
+        void nosave(NODE * node);
+        void nosave(){
+            nosave(root);
+        }
 
-    };
+};

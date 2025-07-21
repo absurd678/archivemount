@@ -1,0 +1,3 @@
+/home/artem/dev/projects/archivemount/build/CMakeFiles/ArchiveFS.dir
+/home/artem/dev/projects/archivemount/build/CMakeFiles/edit_cache.dir
+/home/artem/dev/projects/archivemount/build/CMakeFiles/rebuild_cache.dir

@@ -1,5 +1,24 @@
 #include "ArchiveFS.hpp"
 
+ArchiveFS::ArchiveFS() 
+    : archiveFile(nullptr), 
+      mtpt(nullptr),
+      optionsInstance{0}  // Инициализируем всю структуру нулями
+{
+    // ...
+}
+
+ArchiveFS::~ArchiveFS() {
+    if (archiveFile) {
+        //free(archiveFile);
+        archiveFile = nullptr;
+    }
+    if (mtpt) {
+        //free(mtpt);
+        mtpt = nullptr;
+    }
+}
+
 void ArchiveFS::usage(const char * progname) {
 	fprintf(stderr,
 	        "usage: %s archivepath mountpoint [options]\n"
@@ -39,7 +58,7 @@ NODE * ArchiveFS::init_node() { // Y
 
 	if(node->entry == NULL) {
 		lerrno();
-		node->~node();
+		//node->~node();
 		free(node);
 		return NULL;
 	}
@@ -50,7 +69,7 @@ NODE * ArchiveFS::init_node() { // Y
 void ArchiveFS::free_node(NODE * node) { // Y
 	free(node->name);
 	archive_entry_free(node->entry);
-	node->~node();
+	//node->~node();
 	free(node);
 }
 
@@ -101,7 +120,7 @@ int ArchiveFS::insert_by_path(NODE * node) {
 				return -ENOMEM;
 			}
 			/* insert it recursively */
-			insert_by_path(root, tempnode);
+			insert_by_path(tempnode);
 			/* now inserting node should work, correct cur for it */
 			cur = tempnode;
 		}
@@ -129,34 +148,36 @@ int ArchiveFS::insert_by_path(NODE * node) {
 	return 0;
 }
 
-bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
-	if(archive_read_support_filter_all(archive) != ARCHIVE_OK) {
+bool ArchiveFS::archive_prepopen(struct archive * archiveInstance) { // Y
+	if(archive_read_support_filter_all(archiveInstance) != ARCHIVE_OK) {
 	err:
-		lerr("%s", archive_error_string(archive));
+		lerr("%s", archive_error_string(archiveInstance));
 		return false;
 	}
-	if((options.formatraw ? archive_read_support_format_raw : archive_read_support_format_all)(archive) != ARCHIVE_OK)
+	if((optionsInstance.formatraw ? archive_read_support_format_raw : archive_read_support_format_all)(archiveInstance) != ARCHIVE_OK)
 		goto err;
-	if(options.password && archive_read_add_passphrase(archive, user_passphrase) != ARCHIVE_OK)
+	if(optionsInstance.password && archive_read_add_passphrase(archiveInstance, user_passphrase) != ARCHIVE_OK)
 		goto err;
-	if(archive_read_open_fd(archive, archiveFd, BLOCK_SIZE) != ARCHIVE_OK)
+	if(archive_read_open_fd(archiveInstance, archiveFd, BLOCK_SIZE) != ARCHIVE_OK)
 		goto err;
 	return true;
 }
 
- uint64_t ArchiveFS::total_entry_size_in_archive(NODE * node = root) { // Y?
+ uint64_t ArchiveFS::total_entry_size_in_archive(NODE * node) { // Y?
+	if (node == nullptr) node = root;
 	uint64_t ret = node->entry_size_in_archive;
 	for(auto && [_, child] : node->children)
 		ret += total_entry_size_in_archive(child);
 	return ret;
 }
- void ArchiveFS::redistribute_entry_size_in_archive(double scale, NODE * node = root) { // Y?
+ void ArchiveFS::redistribute_entry_size_in_archive(double scale, NODE * node) { // Y?
+	if (node == nullptr) node = root;
 	node->entry_size_in_archive = node->entry_size_in_archive * scale;
 	for(auto && [_, child] : node->children)
 		redistribute_entry_size_in_archive(scale, child);
 }
  int ArchiveFS::build_tree(mode_t mtpt_mode) { // Y
-	struct archive * archive;
+	archive * archiveInstance;
 	struct stat st;
 	int format;
 	int compression;
@@ -167,8 +188,8 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 	regmatch_t regmatch;
 
 #define PREFIX "^\\.\\?"
-	if(options.subtree_filter) {
-		if(asprintf(&subtree_filter, PREFIX "%s", options.subtree_filter) == -1) {
+	if(optionsInstance.subtree_filter) {
+		if(asprintf(&subtree_filter, PREFIX "%s", optionsInstance.subtree_filter) == -1) {
 			lerrno();
 			return -errno;
 		}
@@ -186,20 +207,25 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 			return -EINVAL;
 		}
 		free(subtree_filter);
-		options.readonly = 1;
+		optionsInstance.readonly = 1;
 	}
 	/* open archive */
-	if((archive = archive_read_new()) == NULL) {
+	if((archiveInstance = archive_read_new()) == NULL) {
 		lerrnum(ENOMEM);
 		return -ENOMEM;
 	}
-	if(!archive_prepopen(archive))
-		return archive_errno(archive);
+
+	// Добавьте форматы явно
+    archive_read_support_format_all(archiveInstance);
+    archive_read_support_filter_all(archiveInstance);
+
+	if(!archive_prepopen(archiveInstance))
+		return archive_errno(archiveInstance);
 	/* check if format or compression prohibits writability */
-	format = archive_format(archive);
-	log("mounted archive format is %s (0x%x)", archive_format_name(archive), format);
-	compression = archive_filter_code(archive, 0);
-	log("mounted archive compression is %s (0x%x)", archive_filter_name(archive, 0), compression);
+	format = archive_format(archiveInstance);
+	log("mounted archive format is %s (0x%x)", archive_format_name(archiveInstance), format);
+	compression = archive_filter_code(archiveInstance, 0);
+	log("mounted archive compression is %s (0x%x)", archive_filter_name(archiveInstance, 0), compression);
 	if(format & ARCHIVE_FORMAT_ISO9660 || format & ARCHIVE_FORMAT_ISO9660_ROCKRIDGE || format & ARCHIVE_FORMAT_ZIP ||
 	   compression == ARCHIVE_COMPRESSION_COMPRESS) {
 		archiveWriteable = false;
@@ -225,11 +251,12 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 	}
 
 	/* read all entries in archive, create node for each */
-	off_t pos = archive_read_header_position(archive), *lastpos{};		// Инициализация смещения по первому заголовку
-	printf("\npos = %d\n", pos);
-	while(archive_read_next_header2(archive, cur->entry) == ARCHIVE_OK) {		// Пока можно прочитать заголовок следующего элемента
-		off_t curpos = archive_read_header_position(archive);
-		printf("\ncurpos = %d\n", curpos);
+	//off_t *lastpos;
+	off_t pos = archive_read_header_position(archiveInstance), *lastpos{};		// Инициализация смещения по первому заголовку
+	
+	while(archive_read_next_header2(archiveInstance, cur->entry) == ARCHIVE_OK) {		// Пока можно прочитать заголовок следующего элемента
+		off_t curpos = archive_read_header_position(archiveInstance);
+		
 		if(lastpos)
 			*lastpos = curpos - pos;
 		lastpos = &cur->entry_size_in_archive;
@@ -240,7 +267,7 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 			/* special case: the directory "./" must be skipped! */
 			continue;
 		}
-		if(options.subtree_filter) {
+		if(optionsInstance.subtree_filter) {
 			if(regexec(&subtree, name, 1, &regmatch, REG_NOTEOL) == REG_NOMATCH)
 				continue;
 
@@ -279,12 +306,12 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 				archive_entry_set_mode(cur->entry, mode | S_IFREG);
 
 			/* references */
-			if(int err; (err = insert_by_path(root, cur))) {
+			if(int err; (err = insert_by_path(cur))) {
 				lerr("ERROR: could not insert %s into tree: %s", cur->name, strerror(-err));
 				return -ENOENT;
 			}
 			printf("\nroot->children: \n");
-			print_tree(root);
+			
 
 			if((cur = init_node()) == NULL)
 				return -ENOMEM;
@@ -292,15 +319,15 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 			/* this is the directory the subtree filter matches, or a root directory, do not respect it */
 		}
 
-		archive_read_data_skip(archive);
+		archive_read_data_skip(archiveInstance);
 	}
-	off_t curpos = archive_read_header_position(archive);
+	off_t curpos = archive_read_header_position(archiveInstance);
 	if(lastpos)
 		*lastpos = curpos - pos;
 	/* free the last unused NODE */
 	free_node(cur);
 
-	archiveFileSize = archive_filter_bytes(archive, -1);
+	archiveFileSize = archive_filter_bytes(archiveInstance, -1);
 	// Right now entry_size_in_archive is /uncompressed/: this is what archive_read_header_position() returns
 	// Accounting by archive_filter_bytes(_, -1) would yield 1234000, 0, 0, 0, 0, 1234000, 0, 0, 0, 0
 	// Redistribute proportionally. Not perfect
@@ -308,9 +335,9 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 	redistribute_entry_size_in_archive((double)archiveFileSize / (double)total);
 
 	/* close archive */
-	archive_read_free(archive);
+	archive_read_free(archiveInstance);
 	lseek(archiveFd, 0, SEEK_SET);
-	if(options.subtree_filter)
+	if(optionsInstance.subtree_filter)
 		regfree(&subtree);
 	return 0;
 }
@@ -326,7 +353,8 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 	return NULL;
 }
 
- void ArchiveFS::correct_hardlinks_to_node(const char * old_name, const char * new_name, NODE * from = root) {
+ void ArchiveFS::correct_hardlinks_to_node(const char * old_name, const char * new_name, NODE * from) {
+	if (from == nullptr) from = root;
 	for(auto && [_, child] : from->children) {
 		const char * tmp = archive_entry_hardlink(child->entry);
 		if(tmp && strcmp(tmp, old_name) == 0) {
@@ -437,7 +465,7 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 		node->name        = newName;
 		node->basename    = strrchr(node->name, '/') + 1;
 		node->namechanged = true;
-		insert_by_path(root, node);
+		insert_by_path(root);
 	}
 	return ret;
 }
@@ -464,11 +492,10 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 		goto err;
 	return fh;
 }
- char * tmpdir_for_nodes;
- uint64_t tmpdir_for_nodes_children;
+ 
  int ArchiveFS::get_temp_node(char ** location, mode_t mode, dev_t dev) {
 	if(!tmpdir_for_nodes)
-		if(int err = get_temp_file(&tmpdir_for_nodes, (mode_t)-1, true))
+		if(int err = this->get_temp_file(&tmpdir_for_nodes, (mode_t)-1, true))
 			return err;
 
 	if(asprintf(location, "%s/%" PRIu64 "", tmpdir_for_nodes, tmpdir_for_nodes_children++) == -1)
@@ -512,7 +539,8 @@ bool ArchiveFS::archive_prepopen(struct archive * archive) { // Y
 /*
  * write a new or modified file to the new archive; used from save()
  */
-thread_local char temp_io_buf[64 * 1024];
+// Определение thread-local переменной
+thread_local char ArchiveFS::temp_io_buf[64 * 1024];
  void ArchiveFS::write_new_modded_file(NODE * node, struct archive_entry * wentry, struct archive * newarc) {
 	if(node->location) {
 		struct stat st;
@@ -571,9 +599,9 @@ thread_local char temp_io_buf[64 * 1024];
 		lerrno();
 		return -errno;
 	}
-	if(last_open_node.archive) {
-		archive_read_free(last_open_node.archive);
-		last_open_node.archive = NULL;
+	if(last_open_node.archiveInstance) {
+		archive_read_free(last_open_node.archiveInstance);
+		last_open_node.archiveInstance = NULL;
 	}
 	close(archiveFd);
 	if(rename(archiveFile, oldfilename) == -1) {
@@ -617,7 +645,7 @@ thread_local char temp_io_buf[64 * 1024];
 		lerr("could not open new archive file for writing: %s", strerror(errno));
 		return -errno;
 	}
-	if(options.password) {
+	if(optionsInstance.password) {
 		/* When libarchive gains support for multiple kinds of encryption and
 		 * an API to say which kind is in use, this should use copy oldarc's
 		 * encryption settings.  For now, just set the one kind of encryption
@@ -708,7 +736,7 @@ thread_local char temp_io_buf[64 * 1024];
 	close(tempfile);
 	close(archiveFd);
 	archiveFd = open(archiveFile, O_RDONLY | O_CLOEXEC);
-	if(options.nobackup) {
+	if(optionsInstance.nobackup) {
 		if(unlink(oldfilename) == -1) {
 			lerr("Could not remove .orig archive file (%s): %s", oldfilename, strerror(errno));
 			return -errno;
@@ -718,7 +746,8 @@ thread_local char temp_io_buf[64 * 1024];
 }
 
 // Kill temporary files
- void ArchiveFS::nosave(NODE * node = root) { // Y?
+ void ArchiveFS::nosave(NODE * node) { // Y?
+	
 	if(node->location) {
 		auto st = archive_entry_stat(node->entry);
 		if(S_ISDIR(st->st_mode)) {
