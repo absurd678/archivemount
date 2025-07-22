@@ -230,12 +230,6 @@ bool ArchiveFS::archive_prepopen(struct archive * archiveInstance) { // Y
 	printf("Archive fd: %d\n", archiveFd);
 	printf("Archive ptr: %p\n", archiveInstance);
 
-	// форматы явно
-	printf("Before");
-    //archive_read_support_format_all(archiveInstance);
-    //archive_read_support_filter_all(archiveInstance);
-	printf("After archive_read_support_format_all(archiveInstance);archive_read_support_filter_all(archiveInstance);");
-
 	if(!archive_prepopen(archiveInstance)){
 		printf("!archive_prepopen(archiveInstance)");
 		return archive_errno(archiveInstance);

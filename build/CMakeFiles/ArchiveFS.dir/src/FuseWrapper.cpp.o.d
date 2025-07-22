@@ -226,8 +226,7 @@ CMakeFiles/ArchiveFS.dir/src/FuseWrapper.cpp.o: \
  /usr/include/c++/12/bits/basic_ios.tcc \
  /usr/include/c++/12/bits/ostream.tcc /usr/include/c++/12/istream \
  /usr/include/c++/12/bits/istream.tcc \
- /home/artem/dev/projects/archivemount/include/ArchiveFS.hpp \
- /usr/include/c++/12/csignal /usr/include/signal.h \
+ /usr/include/x86_64-linux-gnu/sys/wait.h /usr/include/signal.h \
  /usr/include/x86_64-linux-gnu/bits/signum-generic.h \
  /usr/include/x86_64-linux-gnu/bits/signum-arch.h \
  /usr/include/x86_64-linux-gnu/bits/types/sig_atomic_t.h \
@@ -248,4 +247,6 @@ CMakeFiles/ArchiveFS.dir/src/FuseWrapper.cpp.o: \
  /usr/include/x86_64-linux-gnu/bits/ss_flags.h \
  /usr/include/x86_64-linux-gnu/bits/types/struct_sigstack.h \
  /usr/include/x86_64-linux-gnu/bits/sigthread.h \
- /usr/include/x86_64-linux-gnu/bits/signal_ext.h
+ /usr/include/x86_64-linux-gnu/bits/signal_ext.h \
+ /home/artem/dev/projects/archivemount/include/ArchiveFS.hpp \
+ /usr/include/c++/12/csignal

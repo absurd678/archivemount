@@ -2,7 +2,9 @@
 
 namespace {
 
-	ArchiveFS fs{};
+	ArchiveFS fs{};	// Глобальная переменная объекта в namespace реализаций API
+	const char* archivePath;
+	const char* mountPath;
 	int ar_opt_proc(void *, const char * arg, int key, struct fuse_args * outargs) { // Менять не надо
 		struct fuse_operations faux_oper;
 		switch(key) {
@@ -15,17 +17,18 @@ namespace {
 				return 1;
 	
 			case FUSE_OPT_KEY_NONOPT:
-				if(!fs.archiveFile) {
+				if(!archivePath/*!fs.archiveFile*/) {
 					//fs.archiveFile = arg;
 					// Создаем копию строки
-					fs.archiveFile = strdup(arg);
-					printf("\nFUSE_OPT_KEY_NONOPT !archiveFile\n");
+					//fs.archiveFile = strdup(arg);
+					archivePath = strdup(arg);
+					printf("\narchivePath = %s\n", archivePath);
 					return 0;
-				} else if(!fs.mtpt) {
+				} else if(!mountPath/*fs.mtpt*/) {
 					// Создаем копию строки
-					fs.mtpt = strdup(arg);
+					/*fs.mtpt*/mountPath = strdup(arg);
 					//fs.mtpt = arg;
-					printf("\nFUSE_OPT_KEY_NONOPT !mtpt\n");
+					printf("\nmountPath = %s\n", mountPath);
 					return 1;
 				} else {
 					fs.usage(outargs->argv[0]);
@@ -1307,32 +1310,27 @@ namespace {
 		return 0;
 	}
 
-}
+	const fuse_opt ar_opts[] = {
+		AR_OPT("readonly", readonly, 1),
+		AR_OPT("-r", readonly, 1),
+		AR_OPT("password", password, 1),
+		AR_OPT("nobackup", nobackup, 1),
+		AR_OPT("nosave", nosave, 1),
+		AR_OPT("subtree=%s", subtree_filter, 1),
+		AR_OPT("formatraw", formatraw, 1),
+	
+		// Добавьте обработку стандартных опций FUSE
+		FUSE_OPT_KEY("-o ", FUSE_OPT_KEY_KEEP),  // Пробел после -o важен!
+		FUSE_OPT_KEY("-o", FUSE_OPT_KEY_KEEP),
+	
+		FUSE_OPT_KEY("-V", KEY_VERSION),
+		FUSE_OPT_KEY("--version", KEY_VERSION),
+		FUSE_OPT_KEY("-h", KEY_HELP),
+		FUSE_OPT_KEY("--help", KEY_HELP),
+		FUSE_OPT_END
+	};
 
-
-//------------------------------ методы FuseWrapper-------------------------------
-
-const fuse_opt FuseWrapper::ar_opts[] = {
-	AR_OPT("readonly", readonly, 1),
-	AR_OPT("-r", readonly, 1),
-	AR_OPT("password", password, 1),
-	AR_OPT("nobackup", nobackup, 1),
-	AR_OPT("nosave", nosave, 1),
-	AR_OPT("subtree=%s", subtree_filter, 1),
-	AR_OPT("formatraw", formatraw, 1),
-
-	// Добавьте обработку стандартных опций FUSE
-    FUSE_OPT_KEY("-o ", FUSE_OPT_KEY_KEEP),  // Пробел после -o важен!
-    FUSE_OPT_KEY("-o", FUSE_OPT_KEY_KEEP),
-
-	FUSE_OPT_KEY("-V", KEY_VERSION),
-	FUSE_OPT_KEY("--version", KEY_VERSION),
-	FUSE_OPT_KEY("-h", KEY_HELP),
-	FUSE_OPT_KEY("--help", KEY_HELP),
-	FUSE_OPT_END
-};
-
-	const struct fuse_operations FuseWrapper::ar_oper = {
+	const struct fuse_operations ar_oper = {
 	    .getattr  = ar_getattr,
 		.readlink = ar_readlink,
 		.mknod    = ar_mknod,
@@ -1354,25 +1352,47 @@ const fuse_opt FuseWrapper::ar_opts[] = {
 		.utimens  = ar_utimens,
 	};
 
+}
 
 
-int FuseWrapper::mount(int argc, char** argv){
+
+int parseInput(int argc, char** argv, FuseWrapper& fw,
+const char*& initArchivePath, const char*& initMountPath, char* subTree){
+
+	fw.args = FUSE_ARGS_INIT(argc, argv);
+
+	/* parse cmdline args */
+	if(fuse_opt_parse(&fw.args, &fs.optionsInstance, ar_opts, ar_opt_proc) == -1)
+		return -1;
+	if(/*fs.archiveFile*/archivePath == NULL) {
+		fs.usage(argv[0]);
+		return (1);
+	}
+	if(/*fs.mtpt*/mountPath == NULL) {
+		fs.usage(argv[0]);
+		return (1);
+	}
+	printf("Print smth you damn piece of shit!");
+	printf("before strcpy %s %s %s", archivePath, mountPath, fs.optionsInstance.subtree_filter);
+	initArchivePath = archivePath;
+	initMountPath = mountPath;
+	if(fs.optionsInstance.subtree_filter) 
+		strcpy(subTree, fs.optionsInstance.subtree_filter);
+	printf("after strcpy %s %s %s", initArchivePath, initMountPath, subTree);
+	return 0;
+}
+
+
+//------------------------------ методы FuseWrapper-------------------------------
+
+int FuseWrapper::mount(const char* initArchivePath, const char* initMountPath, char* subTree){
 
 	struct stat st;
 	int oldwd             = -1;
-	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-
-	/* parse cmdline args */
-	if(fuse_opt_parse(&args, &fs.optionsInstance, ar_opts, ar_opt_proc) == -1)
-		return -1;
-	if(fs.archiveFile == NULL) {
-		fs.usage(argv[0]);
-		return (1);
-	}
-	if(fs.mtpt == NULL) {
-		fs.usage(argv[0]);
-		return (1);
-	}
+	fs.archiveFile = initArchivePath;
+	fs.mtpt = initMountPath;
+	//if (subTree)
+		//strcpy(fs.optionsInstance.subtree_filter, subTree);
 
 	/* check if mtpt is ok and writeable */
 	if(stat(fs.mtpt, &st) != 0) {
@@ -1448,137 +1468,48 @@ int FuseWrapper::mount(int argc, char** argv){
 
 		fs.nosave();
 	}
+	return 0;
+}
 
-    /*struct stat st;
-	int oldwd             = -1;
-	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-
-	signal(SIGINT, [](int) { fuse_exit(fuse_get_context()->fuse); });
-	signal(SIGTERM, [](int) { fuse_exit(fuse_get_context()->fuse); });
-
-	// Сохраняем оригинальные аргументы
-	const char* saved_archive = (argc > 1) ? argv[argc-2] : nullptr;
-	const char* saved_mtpt = (argc > 2) ? argv[argc-1] : nullptr;
-
-	printf("Using FUSE version %d.%d\n", FUSE_MAJOR_VERSION, FUSE_MINOR_VERSION);
-	
-	// parse cmdline args /
-	if(fuse_opt_parse(&args, &fs.optionsInstance, ar_opts, ar_opt_proc) == -1){ // От чего зависит?
-	printf("\nfuse_opt_parse\n");
+int FuseWrapper::unmount() {
+	if (!fs.mtpt || fs.mtpt[0] == '\0') {
+		lerr("Mount point not specified");
 		return -1;
 	}
-	//if(fs.archiveFile == NULL) {
-	//	printf("fs.archiveFile == NULL\n");
-	//	fs.usage(argv[0]);
-	//	return (1);
-	//}
-	//if(fs.mtpt == NULL) {
-	//	printf("fs.mtpt == NULL\n");
-	//	fs.usage(argv[0]);
-	//	return (1);
-	//}//
-
-	// Если значения не установились, используем сохраненные
-	if (!fs.archiveFile && saved_archive) {
-		fs.archiveFile = strdup(saved_archive);
-	}
-	if (!fs.mtpt && saved_mtpt) {
-		fs.mtpt = strdup(saved_mtpt);
-	}
-
-	// Проверяем обязательные аргументы
-	if (!fs.archiveFile || !fs.mtpt) {
-		fprintf(stderr, "Error: Missing required arguments\n");
-		fs.usage(argv[0]);
-		return 1;
-	}
-
-	// Отладочный вывод
-	printf("After parsing:\n");
-	printf("  Archive: %s\n", fs.archiveFile);
-	printf("  Mount point: %s\n", fs.mtpt);
-	//fuse_opt_add_arg(&args, "-s");  // Single-threaded режим
-
-
-	// check if mtpt is ok and writeable /
-	if(stat(fs.mtpt, &st) != 0) {
-		printf("%s: %s", fs.mtpt, strerror(errno));
-		lerr("%s: %s", fs.mtpt, strerror(errno));
-		return (1);
-	}
-	// https://github.com/libfuse/libfuse/commit/64e11073b9347fcf9c6d1eea143763ba9e946f70
-	if(!strncmp(fs.mtpt, "/dev/fd/", sizeof("/dev/fd/") - 1))	// fs.mtpt имеет вид /dev/fd/N то 
-		st.st_mode = (st.st_mode & ~S_IFMT) | S_IFDIR; //  заставляем линукс думать что это директория
-	else if(!S_ISDIR(st.st_mode)) {		// Иначе проверяем чтоб fs.mtpt был директорией
-		printf("%s: %s", fs.mtpt, strerror(ENOTDIR));
-		lerr("%s: %s", fs.mtpt, strerror(ENOTDIR));
-		return (1);
-	}
-
-	if(fs.optionsInstance.password) { // Пока не оч разбирал 
-		struct termios orig = noEcho();
-		fputs("Enter passphrase: ", stderr);
-		size_t user_passphrase_size;
-		getPassphrase(&fs.user_passphrase, &user_passphrase_size, stdin);
-		fputs("\n", stderr);
-		tcsetattr(0, TCSANOW, &orig);
-	}
-
-	if(fs.optionsInstance.formatraw)
-		fs.optionsInstance.readonly = true;
-	if(fs.optionsInstance.readonly)
-		fuse_opt_add_arg(&args, "-r");	// Не разбирал
-	else
-		fs.archiveWriteable = fs.optionsInstance.nosave || (access(fs.archiveFile, W_OK) == 0);
-
-	// open archive and read meta data /
-	fs.archiveFd = open(fs.archiveFile, O_RDONLY | O_CLOEXEC);
-	if(fs.archiveFd == -1) {
-		printf("%s: %s", fs.archiveFile, strerror(errno));
-		lerr("%s: %s", fs.archiveFile, strerror(errno));
-		return 1;
-	}
-	if(fs.build_tree(st.st_mode) != 0) {
-		printf("Insuccessful build_tree\n");
-		return (1);
-	}
-	if(fs.optionsInstance.formatraw) {
-		// create rawcache /
-		fs.rawcache.st_size = _ar_getsizeraw(fs.firstchild(fs.root)->name);
-		// log("cache st_size = %ld",rawcache.st_size);
-	}
-
-#ifndef O_PATH
-#define O_PATH O_RDONLY
-#endif
-	// fs.save directory this was started from /
-	if(!fs.optionsInstance.readonly && !fs.optionsInstance.nosave)
-		oldwd = open(".", O_PATH | O_CLOEXEC);		// Открывают текущую директорию, но зачем?
-
-	// Initialize the node tree lock //
-	pthread_mutex_init(&fs.lock, NULL);
-
-	// always use fuse in single-threaded mode
-	 // multithreading is broken with libarchive :-( LOL
-	 //
-	fuse_opt_add_arg(&args, "-s");
-	fuse_opt_add_arg(&args, "-o");
-	fuse_opt_add_arg(&args, "default_permissions");
 	
-	fuse_main(args.argc, args.argv, &ar_oper, NULL);
-
-	// fs.save changes if modified; must be in original directory (libarchive can chdir) /
-	if(fs.archiveModified) {
-		if(!fs.optionsInstance.nosave) {
-			if(fchdir(oldwd))
-				fprintf(stderr, "fchdir() to old path failed, can't fs.save new archive\n");
-			else if(int err = fs.save(fs.archiveFile); err)
-				fprintf(stderr, "Saving new archive failed: %s\n", strerror(-err));
-		}
-
-		fs.nosave();
+	// Используем fusermount3 для FUSE3
+	const char* fusermount = "fusermount3";
+	
+	pid_t pid = fork();
+	if (pid == -1) {
+		lerrnum(errno);
+		return -1;
 	}
-
-	return 0;
-	*/
+	
+	if (pid == 0) {
+		// Дочерний процесс
+		execlp(fusermount, fusermount, "-u", "-q", fs.mtpt, (char*)NULL);
+		
+		// Если execlp вернул управление - ошибка
+		lerr("Failed to execute %s: %s", fusermount, strerror(errno));
+		_exit(1);
+	}
+	
+	// Родительский процесс ждет завершения
+	
+	int status;
+    while (waitpid(pid, &status, 0) == -1) {
+		if (errno != EINTR) {
+			lerrnum(errno);
+			return -1;
+		}
+	}
+	
+	if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+		return 0;
+	}
+	
+	lerr("Unmount failed with status %d", status);
+	return -1;
 }
+

@@ -38,6 +38,8 @@
 #include <utime.h>
 #include <wchar.h>
 #include <iostream>
+#include <sys/wait.h>
+#include <string>
 
 // Использование литералов
 using namespace std::literals;

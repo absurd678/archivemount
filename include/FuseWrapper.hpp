@@ -17,22 +17,20 @@
 
 
 
-
 class FuseWrapper{
 
 public:
 
+    struct fuse_args args;
     FuseWrapper(){}
-    ~FuseWrapper(){}
+    ~FuseWrapper(){};
     
     
     
-    int mount(int argc, char* argv[]);
-
-    static const fuse_opt ar_opts[]; 
-    static const struct fuse_operations ar_oper;
-
-    
+    int mount(const char* initArchivePath, const char* initMountPath, char* subTree);
+    int unmount();
 };
 
- 
+int parseInput(int argc, char** argv, FuseWrapper& fw,
+    const char*& initArchivePath, const char*& initMountPath, char* subTree);
+
