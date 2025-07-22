@@ -3,13 +3,13 @@
 namespace {
 
 	ArchiveFS fs{};	// Глобальная переменная объекта в namespace реализаций API
-	const char* archivePath;
-	const char* mountPath;
-	int ar_opt_proc(void *, const char * arg, int key, struct fuse_args * outargs) { // Менять не надо
+	const char* archivePath;	// Глобальный путь к архиву для парсинга
+	const char* mountPath;		// Глобальный путь к точке монтирования для парсинга
+	// ----------------------------FUSE API----------------------------------
+	int ar_opt_proc(void *, const char * arg, int key, struct fuse_args * outargs) {
 		struct fuse_operations faux_oper;
 		switch(key) {
 			case FUSE_OPT_KEY_OPT:
-				printf("FUSE_OPT_KEY_OPT");
 				// Для опций вида "-o параметр" - пропускаем обработку
 				if (strncmp(arg, "-o", 2) == 0) {
 					return 0;  // Разрешаем FUSE обработать самостоятельно
@@ -17,28 +17,21 @@ namespace {
 				return 1;
 	
 			case FUSE_OPT_KEY_NONOPT:
-				if(!archivePath/*!fs.archiveFile*/) {
-					//fs.archiveFile = arg;
-					// Создаем копию строки
-					//fs.archiveFile = strdup(arg);
+				if(!archivePath) {
 					archivePath = strdup(arg);
 					printf("\narchivePath = %s\n", archivePath);
 					return 0;
-				} else if(!mountPath/*fs.mtpt*/) {
-					// Создаем копию строки
-					/*fs.mtpt*/mountPath = strdup(arg);
-					//fs.mtpt = arg;
+				} else if(!mountPath) {
+					mountPath = strdup(arg);
 					printf("\nmountPath = %s\n", mountPath);
 					return 1;
 				} else {
 					fs.usage(outargs->argv[0]);
-					printf("\nFUSE_OPT_KEY_NONOPT else\n");
 					exit(1);
 				}
 	
 			case KEY_HELP:
 				fs.usage(outargs->argv[0]);
-				printf("\nKEY_HELP\n");
 				exit(0);
 	
 			case KEY_VERSION:
@@ -1310,7 +1303,7 @@ namespace {
 		return 0;
 	}
 
-	const fuse_opt ar_opts[] = {
+	const fuse_opt ar_opts[] = { // Настройка режимов работы fuse
 		AR_OPT("readonly", readonly, 1),
 		AR_OPT("-r", readonly, 1),
 		AR_OPT("password", password, 1),
@@ -1330,7 +1323,7 @@ namespace {
 		FUSE_OPT_END
 	};
 
-	const struct fuse_operations ar_oper = {
+	const struct fuse_operations ar_oper = {	// Инстанцирование интерфейса fuse
 	    .getattr  = ar_getattr,
 		.readlink = ar_readlink,
 		.mknod    = ar_mknod,
@@ -1357,28 +1350,27 @@ namespace {
 
 
 int parseInput(int argc, char** argv, FuseWrapper& fw,
-const char*& initArchivePath, const char*& initMountPath, char* subTree){
+const char*& initArchivePath, const char*& initMountPath, char* subTree){ // Парсинг команды
 
 	fw.args = FUSE_ARGS_INIT(argc, argv);
 
 	/* parse cmdline args */
 	if(fuse_opt_parse(&fw.args, &fs.optionsInstance, ar_opts, ar_opt_proc) == -1)
 		return -1;
-	if(/*fs.archiveFile*/archivePath == NULL) {
+	if(archivePath == NULL) {
 		fs.usage(argv[0]);
 		return (1);
 	}
-	if(/*fs.mtpt*/mountPath == NULL) {
+	if(mountPath == NULL) {
 		fs.usage(argv[0]);
 		return (1);
 	}
-	printf("Print smth you damn piece of shit!");
-	printf("before strcpy %s %s %s", archivePath, mountPath, fs.optionsInstance.subtree_filter);
+	
 	initArchivePath = archivePath;
 	initMountPath = mountPath;
 	if(fs.optionsInstance.subtree_filter) 
 		strcpy(subTree, fs.optionsInstance.subtree_filter);
-	printf("after strcpy %s %s %s", initArchivePath, initMountPath, subTree);
+	
 	return 0;
 }
 
@@ -1435,7 +1427,7 @@ int FuseWrapper::mount(const char* initArchivePath, const char* initMountPath, c
 	if(fs.optionsInstance.formatraw) {
 		/* create rawcache */
 		fs.rawcache.st_size = _ar_getsizeraw(fs.firstchild(fs.root)->name);
-		// log("cache st_size = %ld",rawcache.st_size);
+		//log("cache st_size = %ld",rawcache.st_size);
 	}
 
 #ifndef O_PATH
@@ -1472,6 +1464,10 @@ int FuseWrapper::mount(const char* initArchivePath, const char* initMountPath, c
 }
 
 int FuseWrapper::unmount() {
+
+	fs.archiveFile = archivePath;
+	fs.mtpt = mountPath;
+
 	if (!fs.mtpt || fs.mtpt[0] == '\0') {
 		lerr("Mount point not specified");
 		return -1;

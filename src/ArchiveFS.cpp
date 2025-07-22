@@ -1,5 +1,10 @@
 #include "ArchiveFS.hpp"
 
+
+
+//----------------------ArchiveFS----------------------------
+
+
 ArchiveFS::ArchiveFS() 
     : root(nullptr),
     archiveFd(-1),
@@ -7,17 +12,16 @@ ArchiveFS::ArchiveFS()
     archiveFile(nullptr),
     user_passphrase(nullptr),
     tmpdir_for_nodes(nullptr),
-    last_open_node{nullptr, nullptr, 0}{
+    last_open_node{nullptr, nullptr, 0}
+	{
 		memset(&optionsInstance, 0, sizeof(optionsInstance));
 	}
 
 ArchiveFS::~ArchiveFS() {
     if (archiveFile) {
-        //free(archiveFile);
         archiveFile = nullptr;
     }
     if (mtpt) {
-        //free(mtpt);
         mtpt = nullptr;
     }
 }

@@ -81,7 +81,6 @@ CMakeFiles/ArchiveFS.dir/mainCode/main.cpp.o: /home/artem/dev/projects/archivemo
   /usr/include/c++/12/cerrno \
   /usr/include/c++/12/cinttypes \
   /usr/include/c++/12/clocale \
-  /usr/include/c++/12/csignal \
   /usr/include/c++/12/cstdint \
   /usr/include/c++/12/cstdio \
   /usr/include/c++/12/cstdlib \
@@ -695,7 +694,6 @@ CMakeFiles/ArchiveFS.dir/src/FuseWrapper.cpp.o: /home/artem/dev/projects/archive
   /usr/include/c++/12/cerrno \
   /usr/include/c++/12/cinttypes \
   /usr/include/c++/12/clocale \
-  /usr/include/c++/12/csignal \
   /usr/include/c++/12/cstdint \
   /usr/include/c++/12/cstdio \
   /usr/include/c++/12/cstdlib \
@@ -1096,8 +1094,6 @@ CMakeFiles/ArchiveFS.dir/src/FuseWrapper.cpp.o: /home/artem/dev/projects/archive
 
 /usr/include/x86_64-linux-gnu/bits/fcntl-linux.h:
 
-/usr/include/x86_64-linux-gnu/bits/endianness.h:
-
 /usr/include/c++/12/bits/uniform_int_dist.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/struct_sigstack.h:
@@ -1263,8 +1259,6 @@ CMakeFiles/ArchiveFS.dir/src/FuseWrapper.cpp.o: /home/artem/dev/projects/archive
 /usr/include/c++/12/bits/functexcept.h:
 
 /usr/include/archive.h:
-
-/usr/include/c++/12/csignal:
 
 /usr/include/c++/12/bits/locale_facets.h:
 
@@ -1481,6 +1475,8 @@ CMakeFiles/ArchiveFS.dir/src/FuseWrapper.cpp.o: /home/artem/dev/projects/archive
 /usr/include/linux/types.h:
 
 /usr/include/locale.h:
+
+/usr/include/x86_64-linux-gnu/bits/endianness.h:
 
 /usr/include/x86_64-linux-gnu/sys/types.h:
 

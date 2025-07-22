@@ -1,7 +1,8 @@
-//#ifndef ARCHIVEFS_HPP
-//#define ARCHIVEFS_HPP
 #pragma once
 #include "Common.hpp"
+
+// --------------------Служебные функции----------------------
+
 static struct termios noEcho() {
 	struct termios orig, t;
 	tcgetattr(0, &orig);
@@ -19,46 +20,33 @@ static ssize_t getPassphrase(char ** lineptr, size_t * n, FILE * stream) {
 	}
 	return ret;
 }
+//----------------------ArchiveFS----------------------------
 
 class ArchiveFS {
-    public:     // Доступ только для тестирования
+    public:
         
-        ArchiveFS();      // Путь к архиву, флаги
-        ~ArchiveFS();
-        
-        //void mount(const std::string& mountPoint);      
-        
-        /*// Методы для тестирования
-        const Node* getRoot() const { return root_; }
-        bool isMounted() const { return mounted_; }*/
-    
-            // Логика деревьев и т д
-
         //----------------------Поля--------------------------------
 
         int archiveFd;      // Дескриптор архива
         options optionsInstance;   // выбранные режимы работы
-        NODE * root;
+        NODE * root;            // Корень файловой системы
         const char * mtpt;  // Путь к точке монтирования 
         const char * archiveFile;		// Путь к архиву каталога
-        char * user_passphrase;      
-        bool archiveWriteable; 
-        bool archiveModified;
-        uint64_t archiveFileSize; 
-        
+        char * user_passphrase;      // Пароль
+        bool archiveWriteable;  // Изменяемость файла архива
+        bool archiveModified;   // Изменяли ли архив
+        uint64_t archiveFileSize;       // Размер архива
         char * tmpdir_for_nodes;
         uint64_t tmpdir_for_nodes_children;
         static thread_local char temp_io_buf[64 * 1024];
-
-        last_open_node_struct last_open_node;
-
-
+        last_open_node_struct last_open_node;       // Последний открытый узел 
         FORMATRAW_CACHE rawcache;
-        pthread_mutex_t lock;
+        pthread_mutex_t lock;       // мьютекс
         //--------------------------Методы----------------------------
         
-        void usage(const char * progname);
-        
+        ArchiveFS();
+        ~ArchiveFS();
+        void usage(const char * progname);  
     
 
         //-----------------------Дерево-------------------------
@@ -96,20 +84,20 @@ class ArchiveFS {
         NODE * get_node_for_entry_inner(NODE * under, const char * path);
         NODE * get_node_for_entry(NODE * under, struct archive_entry * entry);
         int rename_recursively(NODE * under, const char * from, const char * to);
-
-               // Унести в поля
         int get_temp_file(char ** location, mode_t mode, bool directory);
         int get_temp_node(char ** location, mode_t mode, dev_t dev);
+        
         /**
          * Updates given nodes node->entry by stat'ing node->location. Does not update
          * the name!
          */
         int update_entry_stat(NODE * node);
+        
         /*
         * write a new or modified file to the new archive; used from save()
         */
-                                   // Унести в поля
         void write_new_modded_file(NODE * node, struct archive_entry * wentry, struct archive * newarc);
+        
         int save(const char * archiveFile);
         void nosave(NODE * node);
         void nosave(){

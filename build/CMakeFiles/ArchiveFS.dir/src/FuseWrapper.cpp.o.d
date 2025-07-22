@@ -248,5 +248,4 @@ CMakeFiles/ArchiveFS.dir/src/FuseWrapper.cpp.o: \
  /usr/include/x86_64-linux-gnu/bits/types/struct_sigstack.h \
  /usr/include/x86_64-linux-gnu/bits/sigthread.h \
  /usr/include/x86_64-linux-gnu/bits/signal_ext.h \
- /home/artem/dev/projects/archivemount/include/ArchiveFS.hpp \
- /usr/include/c++/12/csignal
+ /home/artem/dev/projects/archivemount/include/ArchiveFS.hpp
