@@ -43,6 +43,7 @@ class ArchiveFS {
         const char * archiveFile;		// Путь к архиву каталога
         char * user_passphrase;      
         bool archiveWriteable; 
+        bool archiveModified;
         uint64_t archiveFileSize; 
         
         char * tmpdir_for_nodes;
@@ -50,6 +51,10 @@ class ArchiveFS {
         static thread_local char temp_io_buf[64 * 1024];
 
         last_open_node_struct last_open_node;
+
+
+        FORMATRAW_CACHE rawcache;
+        pthread_mutex_t lock;
         //--------------------------Методы----------------------------
         
         void usage(const char * progname);
@@ -109,6 +114,11 @@ class ArchiveFS {
         void nosave(NODE * node);
         void nosave(){
             nosave(root);
+        }
+
+        size_t count_nodes(NODE * node);
+        size_t count_nodes(){   // Версия по умолчанию
+            return count_nodes(root);
         }
 
 };

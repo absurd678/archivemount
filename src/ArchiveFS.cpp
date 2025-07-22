@@ -1,12 +1,15 @@
 #include "ArchiveFS.hpp"
 
 ArchiveFS::ArchiveFS() 
-    : archiveFile(nullptr), 
-      mtpt(nullptr),
-      optionsInstance{0}  // Инициализируем всю структуру нулями
-{
-    // ...
-}
+    : root(nullptr),
+    archiveFd(-1),
+    mtpt(nullptr),
+    archiveFile(nullptr),
+    user_passphrase(nullptr),
+    tmpdir_for_nodes(nullptr),
+    last_open_node{nullptr, nullptr, 0}{
+		memset(&optionsInstance, 0, sizeof(optionsInstance));
+	}
 
 ArchiveFS::~ArchiveFS() {
     if (archiveFile) {
@@ -186,6 +189,13 @@ bool ArchiveFS::archive_prepopen(struct archive * archiveInstance) { // Y
 	regex_t subtree;
 	int regex_error;
 	regmatch_t regmatch;
+	
+	if (!root) {
+        root = init_node();
+        root->name = strdup("/");
+        root->basename = root->name;
+    }
+
 
 #define PREFIX "^\\.\\?"
 	if(optionsInstance.subtree_filter) {
@@ -215,12 +225,22 @@ bool ArchiveFS::archive_prepopen(struct archive * archiveInstance) { // Y
 		return -ENOMEM;
 	}
 
-	// Добавьте форматы явно
-    archive_read_support_format_all(archiveInstance);
-    archive_read_support_filter_all(archiveInstance);
+	printf("Building tree for archive: %s\n", archiveFile);
+	printf("Root node: %p\n", root);
+	printf("Archive fd: %d\n", archiveFd);
+	printf("Archive ptr: %p\n", archiveInstance);
 
-	if(!archive_prepopen(archiveInstance))
+	// форматы явно
+	printf("Before");
+    //archive_read_support_format_all(archiveInstance);
+    //archive_read_support_filter_all(archiveInstance);
+	printf("After archive_read_support_format_all(archiveInstance);archive_read_support_filter_all(archiveInstance);");
+
+	if(!archive_prepopen(archiveInstance)){
+		printf("!archive_prepopen(archiveInstance)");
 		return archive_errno(archiveInstance);
+	}
+		
 	/* check if format or compression prohibits writability */
 	format = archive_format(archiveInstance);
 	log("mounted archive format is %s (0x%x)", archive_format_name(archiveInstance), format);
@@ -762,4 +782,11 @@ thread_local char ArchiveFS::temp_io_buf[64 * 1024];
 	}
 	for(auto && [_, child] : node->children)
 		nosave(child);
+}
+
+size_t ArchiveFS::count_nodes(NODE * node) {
+	size_t ret = 1;
+	for(auto && [_, child] : node->children)
+		ret += count_nodes(child);
+	return ret;
 }

@@ -93,4 +93,9 @@ enum {
     KEY_HELP,
 };
 
+struct FORMATRAW_CACHE {
+	off_t st_size;
+} ;
+
+
 #endif // COMMON_DEFS_HPP

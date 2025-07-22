@@ -4,9 +4,9 @@
 
 
 int main(int argc, char ** argv){
-    ArchiveFS fs{};
-    FuseWrapper mounter{fs};
+    
+    FuseWrapper mounter{};
     printf("Called from main!");
-	if (mounter.run(argc, argv) != 0) 
+	if (mounter.mount(argc, argv) != 0) 
 		std::cout<<"Something went wrong"<<std::endl;
 }
